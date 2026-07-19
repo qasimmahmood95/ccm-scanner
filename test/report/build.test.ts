@@ -94,4 +94,43 @@ describe("metadata validation", () => {
       buildReport([], { ...fixedMetadata, tool: { name: "  ", version: "1.0.0" } }),
     ).toThrow(/tool\.name/);
   });
+
+  // The shape regex alone would accept this.
+  it("rejects a well-shaped timestamp that is not a real date", () => {
+    expect(() =>
+      buildReport([], { ...fixedMetadata, generatedAt: "2026-99-99T00:00:00Z" }),
+    ).toThrow(/not a real date/);
+  });
+});
+
+// buildReport is the last gate before a document is emitted, so it must not be
+// able to produce something the published schema would reject.
+describe("verdict validation", () => {
+  const control: ControlRef = {
+    ccmId: "IVS-03",
+    ccmTitle: "Network Security",
+    checkId: "ivs/no-open-admin-ports",
+  };
+
+  it("rejects evidence with an empty resourceAddress", () => {
+    const verdict = verdictOf(control, fail([{ resourceAddress: "  ", observed: true }]));
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/empty resourceAddress/);
+  });
+
+  it("rejects an empty ccmTitle", () => {
+    const verdict = verdictOf(
+      { ...control, ccmTitle: "  " },
+      fail([{ resourceAddress: "aws_sg.a", observed: true }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/empty ccmTitle/);
+  });
+
+  it("rejects an unknown status rather than silently counting it as N/A", () => {
+    const verdict = {
+      ...control,
+      status: "maybe" as unknown as "pass",
+      evidence: [{ resourceAddress: "aws_sg.a", observed: true }],
+    };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/unknown status/);
+  });
 });

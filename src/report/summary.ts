@@ -12,19 +12,27 @@ const STATUS_LABEL: Readonly<Record<Status, string>> = {
 };
 
 /**
- * Resource addresses and attribute values come from the scanned infrastructure,
- * so for Markdown purposes they are untrusted: a `|` breaks a table row and a
- * backtick breaks out of a code span.
+ * Resource addresses, attribute values and reasons originate from the scanned
+ * infrastructure, so for Markdown purposes they are untrusted. A newline is the
+ * dangerous one: it ends the current construct and lets arbitrary text become
+ * new document structure — a forged "PASS" section inside a failing report.
+ * Everything untrusted is flattened to a single line before it is emitted.
  */
+function flatten(text: string): string {
+  return text.replace(/\r?\n/g, " ");
+}
+
+/** Escapes a value for use inside a Markdown table cell. */
 function tableCell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  return flatten(text).replace(/\|/g, "\\|");
 }
 
 /** Wraps text in a fence longer than any backtick run it contains (CommonMark). */
 function codeSpan(text: string): string {
-  const longestRun = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
+  const flat = flatten(text);
+  const longestRun = (flat.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0);
   const fence = "`".repeat(longestRun + 1);
-  const padded = text.startsWith("`") || text.endsWith("`") ? ` ${text} ` : text;
+  const padded = flat.startsWith("`") || flat.endsWith("`") ? ` ${flat} ` : flat;
   return `${fence}${padded}${fence}`;
 }
 
@@ -65,7 +73,7 @@ function groupByCheck(verdicts: readonly Verdict[]): ReadonlyMap<string, Verdict
 
 function renderEvidence(verdict: Verdict, lines: string[]): void {
   if (verdict.reason !== undefined) {
-    lines.push(`Reason: ${verdict.reason}`);
+    lines.push(`Reason: ${flatten(verdict.reason)}`);
     lines.push("");
   }
   for (const item of verdict.evidence) {
@@ -76,7 +84,7 @@ function renderEvidence(verdict: Verdict, lines: string[]): void {
     lines.push(`- ${where}`);
     lines.push(`  - observed: ${codeSpan(formatValue(item.observed))}`);
     if (item.expected !== undefined) {
-      lines.push(`  - expected: ${item.expected}`);
+      lines.push(`  - expected: ${flatten(item.expected)}`);
     }
   }
   if (verdict.evidence.length > 0) {
@@ -91,7 +99,7 @@ function renderControl(status: Status, verdicts: readonly Verdict[], lines: stri
     return;
   }
 
-  lines.push(`### ${STATUS_LABEL[status]} · ${first.ccmId} ${first.ccmTitle}`);
+  lines.push(`### ${STATUS_LABEL[status]} · ${first.ccmId} ${flatten(first.ccmTitle)}`);
   lines.push("");
 
   for (const [checkId, group] of groupByCheck(verdicts)) {
@@ -99,6 +107,31 @@ function renderControl(status: Status, verdicts: readonly Verdict[], lines: stri
     lines.push("");
     for (const verdict of group) {
       renderEvidence(verdict, lines);
+    }
+  }
+}
+
+/**
+ * Renders a passing control compactly, but still one line per check so that
+ * per-check traceability survives, and so a not-applicable check inside an
+ * otherwise-passing control still shows its reason.
+ */
+function renderPassingControl(verdicts: readonly Verdict[], lines: string[]): void {
+  const first = verdicts[0];
+  if (first === undefined) {
+    return;
+  }
+
+  lines.push(`- ${first.ccmId} ${flatten(first.ccmTitle)}`);
+  for (const [checkId, group] of groupByCheck(verdicts)) {
+    const status = statusOfControl(group);
+    if (status === "not_applicable") {
+      const reason = group.find((verdict) => verdict.reason !== undefined)?.reason ?? "";
+      lines.push(`  - ${codeSpan(checkId)} — not applicable: ${flatten(reason)}`);
+    } else {
+      lines.push(
+        `  - ${codeSpan(checkId)} — ${plural(group.length, "finding")} (${STATUS_LABEL[status].toLowerCase()})`,
+      );
     }
   }
 }
@@ -163,14 +196,7 @@ export function renderSummary(report: Report): string {
       lines.push("### Passing");
       lines.push("");
       for (const verdicts of passing) {
-        const first = verdicts[0];
-        if (first === undefined) {
-          continue;
-        }
-        lines.push(
-          `- ${first.ccmId} ${first.ccmTitle} (${codeSpan(first.checkId)}) — ` +
-            `${plural(verdicts.length, "finding")}`,
-        );
+        renderPassingControl(verdicts, lines);
       }
       lines.push("");
     }

@@ -42,20 +42,45 @@ function validateMetadata(metadata: RunMetadata): void {
         `"${metadata.generatedAt}"`,
     );
   }
+  // The pattern only checks shape; "2026-99-99T00:00:00Z" passes it.
+  if (Number.isNaN(Date.parse(metadata.generatedAt))) {
+    throw new Error(`report metadata generatedAt is not a real date: "${metadata.generatedAt}"`);
+  }
 }
 
+const STATUSES: readonly Status[] = ["pass", "fail", "not_applicable"];
+
 /**
- * Every verdict must land in an in-scope domain. Otherwise it would be counted
- * in the totals but omitted from the per-domain sections — a FAIL that renders
- * as a headline with no detail. Fail loudly instead.
+ * Verdicts are checked here as well as at construction, because this is the
+ * last gate before a document is emitted and the published schema is only
+ * load-bearing if we cannot produce something that violates it.
+ *
+ * The domain check matters most: a verdict outside the in-scope domains would
+ * be counted in the totals but omitted from every per-domain section — a FAIL
+ * that renders as a headline with no detail. Fail loudly instead.
  */
-function assertVerdictsAreInScope(verdicts: readonly Verdict[]): void {
+function assertVerdictsAreWellFormed(verdicts: readonly Verdict[]): void {
   for (const verdict of verdicts) {
     if (domainOfCcmId(verdict.ccmId) === undefined) {
       throw new Error(
         `verdict from check "${verdict.checkId}" has ccmId "${verdict.ccmId}", which is not ` +
           `an in-scope CCM control id (expected e.g. "IVS-03"); it would be dropped from the report`,
       );
+    }
+    if (!STATUSES.includes(verdict.status)) {
+      throw new Error(
+        `verdict from check "${verdict.checkId}" has unknown status "${String(verdict.status)}"`,
+      );
+    }
+    if (verdict.ccmTitle.trim() === "") {
+      throw new Error(`verdict from check "${verdict.checkId}" has an empty ccmTitle`);
+    }
+    for (const item of verdict.evidence) {
+      if (item.resourceAddress.trim() === "") {
+        throw new Error(
+          `verdict from check "${verdict.checkId}" has evidence with an empty resourceAddress`,
+        );
+      }
     }
   }
 }
@@ -126,7 +151,7 @@ function rollUpByDomain(verdicts: readonly Verdict[]): readonly DomainRollup[] {
  */
 export function buildReport(verdicts: readonly Verdict[], metadata: RunMetadata): Report {
   validateMetadata(metadata);
-  assertVerdictsAreInScope(verdicts);
+  assertVerdictsAreWellFormed(verdicts);
 
   const controls = tally(controlStatuses(verdicts));
   const findings = tally(verdicts.map((verdict) => verdict.status));

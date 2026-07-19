@@ -67,6 +67,12 @@ describe("report JSON schema", () => {
     expect(validate(doc)).toBe(false);
   });
 
+  it("rejects a checkId whose slug embeds the CCM control number", () => {
+    const doc = reportDocument();
+    requireVerdict(doc, "fail").checkId = "ivs/ivs-03-open-ports";
+    expect(validate(doc)).toBe(false);
+  });
+
   it("rejects an out-of-scope CCM domain", () => {
     const doc = reportDocument();
     requireVerdict(doc, "fail").ccmId = "TVM-01";

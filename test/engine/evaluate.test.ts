@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { createRegistry, evaluate, pass, type Check } from "../../src/index.js";
+import { createRegistry, evaluate, pass, type Check, type Finding } from "../../src/index.js";
 import { stubChecks, stubModel } from "../support/stubs.js";
+
+/** Checks must go through the registry before they can be evaluated. */
+function validated(checks: readonly Check[]) {
+  return createRegistry(checks).select();
+}
 
 describe("evaluate", () => {
   it("orders verdicts by ccmId regardless of check registration order", () => {
-    const forward = evaluate(createRegistry(stubChecks).select(), stubModel);
-    const reversed = evaluate(createRegistry([...stubChecks].reverse()).select(), stubModel);
+    const forward = evaluate(validated(stubChecks), stubModel);
+    const reversed = evaluate(validated([...stubChecks].reverse()), stubModel);
 
     expect(forward.map((verdict) => verdict.ccmId)).toEqual([
       "CEK-03",
@@ -29,7 +34,7 @@ describe("evaluate", () => {
       ccmTitle: "Least Privilege",
       run: () => [pass([{ resourceAddress: "aws_iam_policy.x", observed: true }])],
     };
-    const [verdict] = evaluate([check], stubModel);
+    const [verdict] = evaluate(validated([check]), stubModel);
     expect(verdict).toMatchObject({
       ccmId: "IAM-05",
       ccmTitle: "Least Privilege",
@@ -46,6 +51,18 @@ describe("evaluate", () => {
         throw new Error("kaboom");
       },
     };
-    expect(() => evaluate([boom], stubModel)).toThrow(/check "iam\/boom" \(IAM-05\) threw/);
+    expect(() => evaluate(validated([boom]), stubModel)).toThrow(
+      /check "iam\/boom" \(IAM-05\) failed/,
+    );
+  });
+
+  it("names the check when it returns something that is not an array", () => {
+    const wrong: Check = {
+      checkId: "iam/wrong",
+      ccmId: "IAM-05",
+      ccmTitle: "Least Privilege",
+      run: () => undefined as unknown as readonly Finding[],
+    };
+    expect(() => evaluate(validated([wrong]), stubModel)).toThrow(/check "iam\/wrong"/);
   });
 });

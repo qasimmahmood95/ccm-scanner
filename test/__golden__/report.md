@@ -30,7 +30,8 @@ Reason: Periodic access review is a process control with no signal in declarativ
 
 ### Passing
 
-- CEK-03 Data Encryption (`cek/encryption-at-rest`) — 2 findings
+- CEK-03 Data Encryption
+  - `cek/encryption-at-rest` — 2 findings (pass)
 
 ## IVS — Infrastructure & Virtualization Security
 

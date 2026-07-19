@@ -1,7 +1,7 @@
 import type { ResourceModel } from "../model/resource.js";
 import { verdictOf, type Finding, type Verdict } from "../model/verdict.js";
 import { compareStrings } from "../util/compare.js";
-import type { Check } from "./check.js";
+import type { ValidatedCheck } from "./registry.js";
 
 function firstAddress(verdict: Verdict): string {
   return verdict.evidence[0]?.resourceAddress ?? "";
@@ -21,11 +21,15 @@ function compareVerdicts(a: Verdict, b: Verdict): number {
  * explicit order (not registration order), so the same input always yields a
  * byte-identical report.
  *
- * The control identity is stamped here rather than trusted from the check, and
- * a throwing check surfaces with the id of the check that threw instead of
- * silently taking down the whole scan with an anonymous stack trace.
+ * Only checks that came through `createRegistry` are accepted, so the registry
+ * invariants cannot be routed around. The control identity is stamped here
+ * rather than trusted from the check, and anything a check does wrong surfaces
+ * with the id of the check that did it.
  */
-export function evaluate(checks: readonly Check[], model: ResourceModel): readonly Verdict[] {
+export function evaluate(
+  checks: readonly ValidatedCheck[],
+  model: ResourceModel,
+): readonly Verdict[] {
   const verdicts: Verdict[] = [];
 
   for (const check of checks) {
@@ -37,9 +41,13 @@ export function evaluate(checks: readonly Check[], model: ResourceModel): readon
 
     let findings: readonly Finding[];
     try {
-      findings = check.run(model);
+      const returned = check.run(model);
+      if (!Array.isArray(returned)) {
+        throw new TypeError(`expected an array of findings, received ${typeof returned}`);
+      }
+      findings = returned;
     } catch (cause) {
-      throw new Error(`check "${check.checkId}" (${check.ccmId}) threw while evaluating`, {
+      throw new Error(`check "${check.checkId}" (${check.ccmId}) failed while evaluating`, {
         cause,
       });
     }

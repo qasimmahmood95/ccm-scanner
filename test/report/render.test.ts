@@ -5,9 +5,13 @@ import {
   createRegistry,
   evaluate,
   fail,
+  notApplicable,
+  pass,
   renderJson,
   renderSummary,
   verdictOf,
+  type Check,
+  type ControlRef,
 } from "../../src/index.js";
 import {
   GOLDEN_JSON,
@@ -19,6 +23,12 @@ import {
 } from "../support/stubs.js";
 
 const report = buildStubReport();
+
+const IVS_03: ControlRef = {
+  ccmId: "IVS-03",
+  ccmTitle: "Network Security",
+  checkId: "ivs/no-open-admin-ports",
+};
 
 describe("golden files", () => {
   it("renders JSON matching the golden file", () => {
@@ -77,10 +87,6 @@ describe("summary content", () => {
     expect(summary).toContain("Reason: Periodic access review is a process control");
   });
 
-  it("lists a passing control once, with its finding count", () => {
-    expect(summary).toContain("- CEK-03 Data Encryption (`cek/encryption-at-rest`) — 2 findings");
-  });
-
   it("notes explicitly when nothing was evaluated", () => {
     expect(renderSummary(buildReport([], fixedMetadata))).toContain(
       "_No controls were evaluated._",
@@ -88,29 +94,78 @@ describe("summary content", () => {
   });
 });
 
-describe("untrusted values from scanned infrastructure", () => {
-  const verdict = verdictOf(
-    { ccmId: "IVS-03", ccmTitle: "Network Security", checkId: "ivs/no-open-admin-ports" },
-    fail([{ resourceAddress: "aws_sg.a`b", observed: "x|y" }]),
+// docs/control-mapping.md already defines two checks for CEK-03, so a passing
+// control must not report one check's id against every check's findings.
+describe("a passing control with more than one check", () => {
+  const encryption: Check = {
+    checkId: "cek/encryption-at-rest",
+    ccmId: "CEK-03",
+    ccmTitle: "Data Encryption",
+    run: () => [
+      pass([{ resourceAddress: "aws_s3_bucket.a", observed: "aws:kms" }]),
+      pass([{ resourceAddress: "aws_s3_bucket.b", observed: "aws:kms" }]),
+    ],
+  };
+  const tls: Check = {
+    checkId: "cek/tls-enforced",
+    ccmId: "CEK-03",
+    ccmTitle: "Data Encryption",
+    run: () => [notApplicable("no bucket policies are declared in this input")],
+  };
+  const summary = renderSummary(
+    buildReport(evaluate(createRegistry([encryption, tls]).select(), stubModel), fixedMetadata),
   );
-  const summary = renderSummary(buildReport([verdict], fixedMetadata));
 
-  it("widens the code fence so a backtick cannot break out", () => {
-    expect(summary).toContain("``aws_sg.a`b``");
+  it("attributes findings to the check that produced them", () => {
+    expect(summary).toContain("`cek/encryption-at-rest` — 2 findings (pass)");
   });
 
-  it("renders a value containing a pipe without breaking the layout", () => {
-    expect(summary).toContain('"x|y"');
+  it("still surfaces a not-applicable check inside an otherwise passing control", () => {
+    expect(summary).toContain(
+      "`cek/tls-enforced` — not applicable: no bucket policies are declared in this input",
+    );
+  });
+});
+
+describe("untrusted values from scanned infrastructure", () => {
+  it("widens the code fence so a backtick cannot break out", () => {
+    const verdict = verdictOf(IVS_03, fail([{ resourceAddress: "aws_sg.a`b", observed: "x|y" }]));
+    expect(renderSummary(buildReport([verdict], fixedMetadata))).toContain("``aws_sg.a`b``");
+  });
+
+  // A resource address is arbitrary text (a for_each key, a tag). Left raw, a
+  // newline lets it forge document structure inside the audit deliverable.
+  it("cannot forge a heading via newlines in a resource address", () => {
+    const forged = "aws_s3_bucket.b\n\n### PASS · IVS-03 Network Security\n\nNo issues found.";
+    const verdict = verdictOf(IVS_03, fail([{ resourceAddress: forged, observed: true }]));
+    const summary = renderSummary(buildReport([verdict], fixedMetadata));
+
+    expect(summary).not.toMatch(/^### PASS/m);
+    expect(summary.match(/^### /gm)).toHaveLength(1);
+  });
+
+  it("cannot forge structure via newlines in a reason or expectation", () => {
+    const verdict = verdictOf(IVS_03, notApplicable("line one\n\n### PASS · forged\n"));
+    const summary = renderSummary(buildReport([verdict], fixedMetadata));
+    expect(summary).not.toMatch(/^### PASS/m);
   });
 });
 
 describe("non-JSON observed values", () => {
-  it("coerces rather than throwing or dropping the required field", () => {
+  it("coerces a BigInt rather than throwing or dropping the field", () => {
+    const verdict = verdictOf(IVS_03, fail([{ resourceAddress: "aws_sg.a", observed: 10n }]));
+    expect(renderJson(buildReport([verdict], fixedMetadata))).toContain('"observed": "10"');
+  });
+
+  // The cloud-snapshot lane surfaces SDK Date values; recording them as {} would
+  // destroy exactly the evidence LOG/IAM/CEK controls rest on.
+  it("preserves a Date as an ISO string", () => {
     const verdict = verdictOf(
-      { ccmId: "CEK-12", ccmTitle: "Key Rotation", checkId: "cek/kms-key-rotation" },
-      fail([{ resourceAddress: "aws_kms_key.k", observed: 10n }]),
+      IVS_03,
+      fail([{ resourceAddress: "aws_sg.a", observed: new Date(0) }]),
     );
-    const json = renderJson(buildReport([verdict], fixedMetadata));
-    expect(json).toContain('"observed": "10"');
+    expect(renderJson(buildReport([verdict], fixedMetadata))).toContain(
+      '"observed": "1970-01-01T00:00:00.000Z"',
+    );
   });
 });

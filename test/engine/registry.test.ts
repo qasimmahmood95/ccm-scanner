@@ -22,6 +22,12 @@ describe("createRegistry validation", () => {
     );
   });
 
+  it("rejects a slug that embeds the CCM control number", () => {
+    expect(() => createRegistry([check({ checkId: "ivs/ivs-03-open-ports" })])).toThrow(
+      /slug must not embed the CCM control number/,
+    );
+  });
+
   it("rejects a checkId that is not kebab-case", () => {
     expect(() => createRegistry([check({ checkId: "ivs/No_Open_Ports" })])).toThrow(
       /invalid checkId/,
