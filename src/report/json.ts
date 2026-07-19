@@ -1,4 +1,5 @@
 import type { Evidence, Verdict } from "../model/verdict.js";
+import { toJsonSafe } from "../util/json-safe.js";
 import type { DomainRollup, Report, StatusCounts } from "./types.js";
 
 /**
@@ -12,7 +13,7 @@ function serialiseEvidence(evidence: Evidence): Record<string, unknown> {
   if (evidence.attribute !== undefined) {
     out.attribute = evidence.attribute;
   }
-  out.observed = evidence.observed === undefined ? null : evidence.observed;
+  out.observed = toJsonSafe(evidence.observed);
   if (evidence.expected !== undefined) {
     out.expected = evidence.expected;
   }
@@ -43,7 +44,11 @@ function serialiseCounts(counts: StatusCounts): Record<string, number> {
 }
 
 function serialiseDomain(rollup: DomainRollup): Record<string, unknown> {
-  return { domain: rollup.domain, ...serialiseCounts(rollup) };
+  return {
+    domain: rollup.domain,
+    controls: serialiseCounts(rollup.controls),
+    findings: serialiseCounts(rollup.findings),
+  };
 }
 
 /** The report as a plain JSON-ready object, with canonical key order. */
@@ -63,7 +68,8 @@ export function toJsonObject(report: Report): Record<string, unknown> {
       generatedAt: report.metadata.generatedAt,
     },
     headline: report.headline,
-    totals: serialiseCounts(report.totals),
+    controls: serialiseCounts(report.controls),
+    findings: serialiseCounts(report.findings),
     domains: report.domains.map(serialiseDomain),
     verdicts: report.verdicts.map(serialiseVerdict),
   };

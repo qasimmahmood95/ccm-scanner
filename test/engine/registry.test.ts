@@ -72,7 +72,27 @@ describe("selection", () => {
     ]);
   });
 
-  it("intersects domain and ccmId filters", () => {
-    expect(registry.select({ domains: ["IAM"], ccmIds: ["CEK-12"] })).toEqual([]);
+  // A silently-empty selection would exit 0 and print PASS, which is worse than
+  // an error: the operator would believe a control was assessed when it wasn't.
+  it("rejects a domain with no registered checks", () => {
+    expect(() => registry.select({ domains: ["LOG"] })).toThrow(
+      /no registered checks for domain\(s\): LOG/,
+    );
+  });
+
+  it("rejects a control id with no registered check", () => {
+    expect(() => registry.select({ ccmIds: ["IAM-99"] })).toThrow(
+      /no registered checks for control\(s\): IAM-99/,
+    );
+  });
+
+  it("rejects a selector combination that matches nothing", () => {
+    expect(() => registry.select({ domains: ["IAM"], ccmIds: ["CEK-12"] })).toThrow(
+      /matched no registered checks/,
+    );
+  });
+
+  it("rejects an empty domain list rather than selecting nothing", () => {
+    expect(() => registry.select({ domains: [] })).toThrow(/matched no registered checks/);
   });
 });

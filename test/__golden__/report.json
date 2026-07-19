@@ -8,41 +8,85 @@
     "ccmVersion": "v4.0.13",
     "input": {
       "source": "memory:stub-model",
-      "digest": "e6444fe4dfac319680e39b1262a64fbdf017cfba57cf4b7a795c8dc00b9bcc87"
+      "digest": "2b5d03420fcf2f7f1de7072b0cd1bae69c4a3fa0853ee18fd4a6c2d7ad7bd8eb"
     },
     "generatedAt": "2026-01-01T00:00:00.000Z"
   },
   "headline": "fail",
-  "totals": {
+  "controls": {
     "pass": 1,
     "fail": 1,
     "notApplicable": 1,
     "total": 3
   },
+  "findings": {
+    "pass": 2,
+    "fail": 1,
+    "notApplicable": 1,
+    "total": 4
+  },
   "domains": [
     {
       "domain": "IAM",
-      "pass": 0,
-      "fail": 0,
-      "notApplicable": 1,
-      "total": 1
+      "controls": {
+        "pass": 0,
+        "fail": 0,
+        "notApplicable": 1,
+        "total": 1
+      },
+      "findings": {
+        "pass": 0,
+        "fail": 0,
+        "notApplicable": 1,
+        "total": 1
+      }
     },
     {
       "domain": "CEK",
-      "pass": 1,
-      "fail": 0,
-      "notApplicable": 0,
-      "total": 1
+      "controls": {
+        "pass": 1,
+        "fail": 0,
+        "notApplicable": 0,
+        "total": 1
+      },
+      "findings": {
+        "pass": 2,
+        "fail": 0,
+        "notApplicable": 0,
+        "total": 2
+      }
     },
     {
       "domain": "IVS",
-      "pass": 0,
-      "fail": 1,
-      "notApplicable": 0,
-      "total": 1
+      "controls": {
+        "pass": 0,
+        "fail": 1,
+        "notApplicable": 0,
+        "total": 1
+      },
+      "findings": {
+        "pass": 0,
+        "fail": 1,
+        "notApplicable": 0,
+        "total": 1
+      }
     }
   ],
   "verdicts": [
+    {
+      "ccmId": "CEK-03",
+      "ccmTitle": "Data Encryption",
+      "checkId": "cek/encryption-at-rest",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_s3_bucket.archive",
+          "attribute": "server_side_encryption",
+          "observed": "aws:kms",
+          "expected": "server-side encryption enabled"
+        }
+      ]
+    },
     {
       "ccmId": "CEK-03",
       "ccmTitle": "Data Encryption",

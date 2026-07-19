@@ -18,6 +18,11 @@ export interface CheckSelector {
 export interface ControlRegistry {
   /** All registered checks, in stable (ccmId, checkId) order. */
   readonly checks: readonly Check[];
+  /**
+   * Checks matching the selector. Throws if the selector names a domain or
+   * control with no registered check, or matches nothing — a typo in
+   * `--controls` must not silently produce an empty, passing scan.
+   */
   select(selector?: CheckSelector): readonly Check[];
 }
 
@@ -71,21 +76,52 @@ export function createRegistry(checks: readonly Check[]): ControlRegistry {
     (a, b) => compareStrings(a.ccmId, b.ccmId) || compareStrings(a.checkId, b.checkId),
   );
 
+  const knownDomains = new Set<string>();
+  const knownCcmIds = new Set<string>();
+  for (const check of ordered) {
+    const domain = domainOfCcmId(check.ccmId);
+    if (domain !== undefined) {
+      knownDomains.add(domain);
+    }
+    knownCcmIds.add(check.ccmId);
+  }
+
   return {
     checks: ordered,
     select(selector: CheckSelector = {}): readonly Check[] {
-      return ordered.filter((check) => {
-        if (selector.domains !== undefined) {
+      const { domains, ccmIds } = selector;
+
+      if (domains !== undefined) {
+        const unknown = domains.filter((domain) => !knownDomains.has(domain));
+        if (unknown.length > 0) {
+          throw new Error(`no registered checks for domain(s): ${unknown.join(", ")}`);
+        }
+      }
+      if (ccmIds !== undefined) {
+        const unknown = ccmIds.filter((ccmId) => !knownCcmIds.has(ccmId));
+        if (unknown.length > 0) {
+          throw new Error(`no registered checks for control(s): ${unknown.join(", ")}`);
+        }
+      }
+
+      const selected = ordered.filter((check) => {
+        if (domains !== undefined) {
           const domain = domainOfCcmId(check.ccmId);
-          if (domain === undefined || !selector.domains.includes(domain)) {
+          if (domain === undefined || !domains.includes(domain)) {
             return false;
           }
         }
-        if (selector.ccmIds !== undefined && !selector.ccmIds.includes(check.ccmId)) {
+        if (ccmIds !== undefined && !ccmIds.includes(check.ccmId)) {
           return false;
         }
         return true;
       });
+
+      const constrained = domains !== undefined || ccmIds !== undefined;
+      if (constrained && selected.length === 0) {
+        throw new Error("selector matched no registered checks");
+      }
+      return selected;
     },
   };
 }

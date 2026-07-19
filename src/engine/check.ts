@@ -1,12 +1,15 @@
 import type { ResourceModel } from "../model/resource.js";
-import type { Verdict } from "../model/verdict.js";
+import type { Finding } from "../model/verdict.js";
 
 /**
- * A check is a pure function over the resource model. Same input must always
- * produce the same verdicts — this is what makes the evidence pack
- * reproducible and the golden-file tests meaningful.
+ * A check is a pure function over the model. Same input must always produce the
+ * same findings — this is what makes the evidence pack reproducible and the
+ * golden-file tests meaningful.
+ *
+ * Checks return findings, not verdicts: the engine attaches the control
+ * identity, so a check cannot attribute a result to the wrong control.
  */
-export type CheckFn = (model: ResourceModel) => readonly Verdict[];
+export type CheckFn = (model: ResourceModel) => readonly Finding[];
 
 export interface Check {
   /**

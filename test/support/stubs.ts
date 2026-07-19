@@ -4,6 +4,10 @@
  * These are NOT real controls — they exist only to exercise the registry,
  * engine, and renderers before the actual checks land in M3/M4. They use real
  * CCM ids so the rendered golden report is representative.
+ *
+ * The model deliberately contains TWO buckets so that one control (CEK-03)
+ * produces two findings: that is what keeps the controls-vs-findings
+ * distinction honest in the golden files.
  */
 import {
   CCM_VERSION,
@@ -22,10 +26,19 @@ import {
   type RunMetadata,
 } from "../../src/index.js";
 
-/** A tiny fixed model: one encrypted bucket and one world-open security group. */
 export const stubModel: ResourceModel = {
   source: "memory:stub-model",
   resources: [
+    {
+      address: "aws_s3_bucket.archive",
+      type: "aws_s3_bucket",
+      name: "archive",
+      provider: "aws",
+      attributes: {
+        bucket: "example-archive",
+        server_side_encryption: "aws:kms",
+      },
+    },
     {
       address: "aws_s3_bucket.logs",
       type: "aws_s3_bucket",
@@ -70,7 +83,7 @@ const encryptionAtRest: Check = {
   ...CEK_03,
   run: (model) =>
     resourcesOfType(model, "aws_s3_bucket").map((resource) =>
-      pass(CEK_03, [
+      pass([
         {
           resourceAddress: resource.address,
           attribute: "server_side_encryption",
@@ -85,7 +98,7 @@ const noOpenAdminPorts: Check = {
   ...IVS_03,
   run: (model) =>
     resourcesOfType(model, "aws_security_group").map((resource) =>
-      fail(IVS_03, [
+      fail([
         {
           resourceAddress: resource.address,
           attribute: "ingress",
@@ -100,7 +113,6 @@ const userAccessReview: Check = {
   ...IAM_08,
   run: () => [
     notApplicable(
-      IAM_08,
       "Periodic access review is a process control with no signal in declarative infrastructure.",
     ),
   ],

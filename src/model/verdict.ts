@@ -1,15 +1,16 @@
 /**
- * The verdict model — the atomic unit of a report.
+ * The finding/verdict model — the atomic unit of a report.
  *
- * The constructors in this module enforce the rules from CLAUDE.md and
- * ADR-0003 mechanically: a `pass`/`fail` must carry evidence, and a
- * `not_applicable` must carry a reason. We never infer a verdict we cannot
- * evidence.
+ * Checks emit **findings** (a status plus its evidence). The engine stamps the
+ * owning control onto each finding to produce a **verdict**. Checks therefore
+ * cannot mis-attribute a result to the wrong control, and the ADR-0003
+ * invariants — pass/fail must be evidenced, not-applicable must carry a reason
+ * — are enforced in one place that every verdict passes through.
  */
 
 export type Status = "pass" | "fail" | "not_applicable";
 
-/** A single observation backing a verdict. */
+/** A single observation backing a finding. */
 export interface Evidence {
   /** Resource address the observation came from, e.g. `aws_security_group.web`. */
   readonly resourceAddress: string;
@@ -21,17 +22,10 @@ export interface Evidence {
   readonly expected?: string;
 }
 
-export interface Verdict {
-  /** e.g. `IVS-03` — MUST have a row in docs/control-mapping.md. */
-  readonly ccmId: string;
-  /** Verbatim CCM v4.0 title. */
-  readonly ccmTitle: string;
-  /** Stable `<domain>/<slug>` id, e.g. `ivs/no-open-admin-ports`. */
-  readonly checkId: string;
+/** What a check reports about one resource (or about the input as a whole). */
+export interface Finding {
   readonly status: Status;
-  /** Required for `pass`/`fail`; empty for `not_applicable`. */
   readonly evidence: readonly Evidence[];
-  /** Required when status is `not_applicable`. */
   readonly reason?: string;
 }
 
@@ -42,35 +36,52 @@ export interface ControlRef {
   readonly checkId: string;
 }
 
-function assertEvidenced(status: Status, control: ControlRef, evidence: readonly Evidence[]): void {
-  if (evidence.length === 0) {
-    throw new Error(
-      `a "${status}" verdict for ${control.ccmId} (${control.checkId}) requires evidence`,
-    );
-  }
+export interface Verdict extends ControlRef {
+  readonly status: Status;
+  /** Required for `pass`/`fail`; empty for `not_applicable`. */
+  readonly evidence: readonly Evidence[];
+  /** Required when status is `not_applicable`. */
+  readonly reason?: string;
 }
 
-/** Builds a `pass` verdict. Evidence is required: a pass must be evidenced. */
-export function pass(control: ControlRef, evidence: readonly Evidence[]): Verdict {
-  assertEvidenced("pass", control, evidence);
-  return { ...control, status: "pass", evidence };
+/** Reports compliance, evidenced. */
+export function pass(evidence: readonly Evidence[]): Finding {
+  return { status: "pass", evidence };
 }
 
-/** Builds a `fail` verdict. Evidence is required: a fail must be evidenced. */
-export function fail(control: ControlRef, evidence: readonly Evidence[]): Verdict {
-  assertEvidenced("fail", control, evidence);
-  return { ...control, status: "fail", evidence };
+/** Reports non-compliance, evidenced. */
+export function fail(evidence: readonly Evidence[]): Finding {
+  return { status: "fail", evidence };
 }
 
 /**
- * Builds a `not_applicable` verdict. A non-empty reason is required — this is
- * the "never guess" rule from CLAUDE.md, enforced at construction.
+ * Reports that the control cannot be assessed from this input. The reason is
+ * mandatory — we never infer a Pass/Fail we cannot evidence.
  */
-export function notApplicable(control: ControlRef, reason: string): Verdict {
-  if (reason.trim() === "") {
+export function notApplicable(reason: string): Finding {
+  return { status: "not_applicable", evidence: [], reason };
+}
+
+/**
+ * Stamps a control onto a finding, enforcing the verdict invariants. This is
+ * the only supported way to build a `Verdict`.
+ */
+export function verdictOf(control: ControlRef, finding: Finding): Verdict {
+  if (finding.status === "not_applicable") {
+    const reason = finding.reason ?? "";
+    if (reason.trim() === "") {
+      throw new Error(
+        `a "not_applicable" finding for ${control.ccmId} (${control.checkId}) requires a reason`,
+      );
+    }
+    return { ...control, status: "not_applicable", evidence: [], reason };
+  }
+
+  if (finding.evidence.length === 0) {
     throw new Error(
-      `a "not_applicable" verdict for ${control.ccmId} (${control.checkId}) requires a reason`,
+      `a "${finding.status}" finding for ${control.ccmId} (${control.checkId}) requires evidence`,
     );
   }
-  return { ...control, status: "not_applicable", evidence: [], reason };
+
+  return { ...control, status: finding.status, evidence: finding.evidence };
 }

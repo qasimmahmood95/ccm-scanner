@@ -22,7 +22,8 @@
     "ccm-scanner": "./dist/cli/index.js"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./schemas/report.schema.json": "./schemas/report.schema.json"
   },
   "files": [
     "dist",
@@ -30,6 +31,7 @@
     "docs/control-mapping.md"
   ],
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

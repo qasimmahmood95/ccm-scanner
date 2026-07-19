@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
-import { toJsonObject } from "../../src/index.js";
+import { REPORT_SCHEMA_VERSION, toJsonObject } from "../../src/index.js";
 import { buildStubReport } from "../support/stubs.js";
 
 const schema = JSON.parse(
   readFileSync(new URL("../../schemas/report.schema.json", import.meta.url), "utf8"),
-) as object;
+) as { properties: { schemaVersion: { const: string } } };
 
 // `strictRequired` is an ajv-specific lint that objects to `required` appearing
 // inside an `if`/`then` branch. That pattern is idiomatic JSON Schema and the
@@ -39,6 +39,16 @@ describe("report JSON schema", () => {
     expect(valid).toBe(true);
   });
 
+  it("pins schemaVersion to the constant the code emits", () => {
+    expect(schema.properties.schemaVersion.const).toBe(REPORT_SCHEMA_VERSION);
+  });
+
+  it("rejects a report claiming a different schema version", () => {
+    const doc = reportDocument();
+    doc.schemaVersion = "99.7.3";
+    expect(validate(doc)).toBe(false);
+  });
+
   it("rejects a not_applicable verdict with no reason", () => {
     const doc = reportDocument();
     delete requireVerdict(doc, "not_applicable").reason;
@@ -66,6 +76,13 @@ describe("report JSON schema", () => {
   it("rejects unknown top-level properties", () => {
     const doc = reportDocument();
     doc.somethingElse = true;
+    expect(validate(doc)).toBe(false);
+  });
+
+  it("rejects a malformed input digest", () => {
+    const doc = reportDocument();
+    const metadata = doc.metadata as { input: Record<string, unknown> };
+    metadata.input.digest = "not-a-digest";
     expect(validate(doc)).toBe(false);
   });
 });

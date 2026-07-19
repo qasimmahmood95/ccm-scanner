@@ -12,7 +12,7 @@ export interface ToolInfo {
 export interface InputInfo {
   /** Where the model came from, e.g. `terraform-plan:plan.json`. */
   readonly source: string;
-  /** sha256 (hex) of the raw input bytes. */
+  /** sha256 (hex, lowercase) of the input. */
   readonly digest: string;
 }
 
@@ -32,8 +32,19 @@ export interface StatusCounts {
   readonly total: number;
 }
 
-export interface DomainRollup extends StatusCounts {
+/**
+ * Counts are reported at two granularities, because they answer different
+ * questions and conflating them overstates coverage:
+ *
+ * - **controls** — distinct CCM controls assessed. A control is `fail` if any
+ *   of its findings failed, else `pass` if any passed, else `not_applicable`.
+ *   This is the number an auditor cares about.
+ * - **findings** — individual verdicts, typically one per resource examined.
+ */
+export interface DomainRollup {
   readonly domain: CcmDomain;
+  readonly controls: StatusCounts;
+  readonly findings: StatusCounts;
 }
 
 /** `fail` when any control failed, otherwise `pass`. Drives the CLI exit code. */
@@ -43,7 +54,8 @@ export interface Report {
   readonly schemaVersion: string;
   readonly metadata: RunMetadata;
   readonly headline: Headline;
-  readonly totals: StatusCounts;
+  readonly controls: StatusCounts;
+  readonly findings: StatusCounts;
   /** Only domains that produced verdicts, in canonical domain order. */
   readonly domains: readonly DomainRollup[];
   readonly verdicts: readonly Verdict[];

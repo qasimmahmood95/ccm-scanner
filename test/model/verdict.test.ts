@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fail, notApplicable, pass, type ControlRef, type Evidence } from "../../src/index.js";
+import {
+  fail,
+  notApplicable,
+  pass,
+  verdictOf,
+  type ControlRef,
+  type Evidence,
+} from "../../src/index.js";
 
 const control: ControlRef = {
   ccmId: "IVS-03",
@@ -11,36 +18,44 @@ const evidence: readonly Evidence[] = [
   { resourceAddress: "aws_security_group.web", observed: "0.0.0.0/0" },
 ];
 
-describe("pass / fail", () => {
-  it("carries the control identity, status and evidence", () => {
-    const verdict = pass(control, evidence);
-    expect(verdict).toMatchObject({ ...control, status: "pass" });
-    expect(verdict.evidence).toHaveLength(1);
+describe("finding constructors", () => {
+  it("build a status plus its evidence, with no control identity", () => {
+    expect(pass(evidence)).toEqual({ status: "pass", evidence });
+    expect(fail(evidence)).toEqual({ status: "fail", evidence });
   });
 
-  it("omits `reason` entirely rather than setting it to undefined", () => {
-    expect("reason" in pass(control, evidence)).toBe(false);
-    expect("reason" in fail(control, evidence)).toBe(false);
-  });
-
-  it("refuses an unevidenced pass", () => {
-    expect(() => pass(control, [])).toThrow(/requires evidence/);
-  });
-
-  it("refuses an unevidenced fail", () => {
-    expect(() => fail(control, [])).toThrow(/requires evidence/);
+  it("notApplicable carries a reason and no evidence", () => {
+    expect(notApplicable("process control")).toEqual({
+      status: "not_applicable",
+      evidence: [],
+      reason: "process control",
+    });
   });
 });
 
-describe("notApplicable", () => {
-  it("requires a reason and carries no evidence", () => {
-    const verdict = notApplicable(control, "process control");
-    expect(verdict.status).toBe("not_applicable");
-    expect(verdict.reason).toBe("process control");
-    expect(verdict.evidence).toEqual([]);
+describe("verdictOf", () => {
+  it("stamps the control identity onto the finding", () => {
+    expect(verdictOf(control, pass(evidence))).toMatchObject({ ...control, status: "pass" });
   });
 
-  it("refuses a blank reason", () => {
-    expect(() => notApplicable(control, "   ")).toThrow(/requires a reason/);
+  it("omits `reason` entirely rather than setting it to undefined", () => {
+    expect("reason" in verdictOf(control, pass(evidence))).toBe(false);
+    expect("reason" in verdictOf(control, fail(evidence))).toBe(false);
+  });
+
+  it("refuses an unevidenced pass", () => {
+    expect(() => verdictOf(control, pass([]))).toThrow(/requires evidence/);
+  });
+
+  it("refuses an unevidenced fail", () => {
+    expect(() => verdictOf(control, fail([]))).toThrow(/requires evidence/);
+  });
+
+  it("refuses a blank not_applicable reason", () => {
+    expect(() => verdictOf(control, notApplicable("   "))).toThrow(/requires a reason/);
+  });
+
+  it("names the offending control and check in the error", () => {
+    expect(() => verdictOf(control, pass([]))).toThrow(/IVS-03 \(ivs\/no-open-admin-ports\)/);
   });
 });
