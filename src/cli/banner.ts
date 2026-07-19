@@ -12,14 +12,14 @@ export interface Manifest {
  * and from `src/` (via tsx / vitest).
  */
 export function readManifest(): Manifest {
-  const raw = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+  const raw = readFileSync(new URL("../../package.json", import.meta.url), "utf8");
   const { name, version } = JSON.parse(raw) as Manifest;
   return { name, version };
 }
 
 /**
- * Renders the M0 banner. `--version` / `-v` prints only the version line;
- * otherwise a short scaffold notice. The real `scan` CLI arrives in M5.
+ * Renders the CLI banner. `--version` / `-v` prints only the version line.
+ * The real `scan` command arrives in M5.
  */
 export function formatBanner(manifest: Manifest, argv: readonly string[]): string {
   const versionLine = `${manifest.name} ${manifest.version}\n`;

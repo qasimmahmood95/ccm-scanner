@@ -18,6 +18,7 @@
 
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
 
@@ -26,5 +27,5 @@
     "sourceMap": true,
     "noEmit": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts"]
 }

@@ -4,6 +4,10 @@ node_modules
 package-lock.json
 .husky
 
+# Golden files are byte-exact records of what the renderers emit — Prettier
+# must not touch them or the golden tests become meaningless.
+test/__golden__
+
 # Hand-authored Markdown (CLAUDE.md, docs/, ADRs, README) is kept as written;
 # Prettier must not reflow the control-mapping tables.
 *.md
