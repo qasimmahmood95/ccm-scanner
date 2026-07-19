@@ -1,0 +1,7 @@
+# Normalize line endings to LF so husky hooks and shell scripts work cross-platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary

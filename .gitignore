@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# husky internals (regenerated on install)
+.husky/_/
+
+# logs, env, os cruft
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db

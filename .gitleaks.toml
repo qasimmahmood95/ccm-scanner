@@ -1,0 +1,20 @@
+title = "ccm-scanner gitleaks config"
+
+# Use the maintained default ruleset, then allowlist the intentionally fake
+# identifiers that appear in test fixtures and documentation. Real secrets must
+# never enter the repo (see the security posture in CLAUDE.md).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentionally fake fixture/doc identifiers"
+paths = [
+  '''fixtures/(compliant|non-compliant)/.*''',
+]
+regexes = [
+  # Canonical fake AWS account id used across fixtures and docs.
+  '''123456789012''',
+  # AWS's own documentation example credentials.
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+]

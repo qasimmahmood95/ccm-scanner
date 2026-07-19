@@ -1,0 +1,8 @@
+# Secret scan of staged changes with gitleaks.
+# Runs only if gitleaks is installed locally; CI enforces it unconditionally.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --staged --redact --no-banner
+else
+  echo "!  gitleaks not installed - skipping local secret scan (CI still enforces it)."
+  echo "   Install: https://github.com/gitleaks/gitleaks#installing"
+fi

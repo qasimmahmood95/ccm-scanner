@@ -1,0 +1,116 @@
+# Control Mapping — CCM v4.0 → concrete checks
+
+**This table is the source of truth.** Code in `src/controls/` must use the exact
+`CCM ID`, verbatim `Control Title`, and `Check ID` recorded here. Any divergence
+between code and this table is a bug (see the auditable-control workflow in
+`CLAUDE.md` and ADR-0003).
+
+## Provenance & version
+
+- **Framework:** CSA Cloud Controls Matrix, **v4.0**, pinned to patch release
+  **v4.0.13** (see **ADR-0001** for why the v4.0 line, **ADR-0003** for the pin).
+  The pinned version string is echoed in every generated report's metadata.
+- **Newer line exists:** CCM **v4.1** shipped 2025-11-06; migrating to it is
+  tracked as future work (ADR-0001), not a v1 dependency. Both CCM v4.0.x and
+  v4.1 are accepted through **December 2027**, so there is no urgency — the
+  migration trigger is that deadline (and CSA publishing the official
+  v4.0.13 → v4.1 control mapping).
+- **Verbatim titles:** control titles below are copied **verbatim** from CCM
+  v4.0.13 and, before release, validated against the official CSA CCM spreadsheet
+  — the authoritative source. The online mirrors used during drafting are
+  convenience references, not the citation of record.
+- **Provider scope (v1):** AWS Terraform provider. Evidence sources reference AWS
+  resource types; the check logic is provider-agnostic and keyed off the
+  normalized `ResourceModel`.
+
+## Check ID convention
+
+A `checkId` is **`<domain>/<slug>`**: the CCM **domain** code (`iam`, `log`,
+`cek`, `ivs` — stable across CCM v4.x) plus a semantic slug for what the check
+does. It deliberately **does not embed the CCM control number**. CCM renumbers
+individual controls between versions (e.g. v4.1 shifts IAM-13 → IAM-12), so
+binding a check's identity to a control number would force cascading renames of
+checks, fixtures, and golden files on every framework bump. Keeping `checkId`
+stable — and carrying the volatile `ccmId`/`ccmTitle` in their own columns —
+means a re-baseline (e.g. to v4.1) edits only those columns. Traceability is
+preserved because every `Verdict` carries `checkId`, `ccmId`, and `ccmTitle`
+together; reports may render a combined label such as `IAM-16 · no-wildcard-trust`
+from the current mapping. See **ADR-0003**.
+
+## Coverage classes
+
+| Class | Meaning |
+|---|---|
+| **Yes** | Fully checkable from IaC. Produces `pass` or `fail` with evidence. |
+| **Partial** | The IaC-visible portion is checked; the runtime/process portion is out of reach. Produces `pass`/`fail` for what is visible, and notes the gap. |
+| **NA** | Not checkable from the input at all. Always registered as `not_applicable` **with a reason** — never guessed. Included here to make the scoping decision explicit and auditable. |
+
+`Verdict logic` reads as: **FAIL when …**, otherwise **PASS** (unless stated NA).
+
+---
+
+## IAM — Identity & Access Management
+
+| CCM ID | Control Title (CCM v4.0) | Check ID | What the scanner checks | Evidence source (AWS / Terraform) | Verdict logic | Coverage |
+|---|---|---|---|---|---|---|
+| **IAM-05** | Least Privilege | `iam/no-wildcard-allow` | No IAM policy `Allow` statement grants `Action:"*"` **and** `Resource:"*"`. | `aws_iam_policy.policy`, `aws_iam_role_policy`, `aws_iam_user_policy`, `aws_iam_group_policy`, `data.aws_iam_policy_document` statements | **FAIL** if any Allow stmt has both action `*` and resource `*`. | Yes |
+| **IAM-16** | Authorization Mechanisms | `iam/no-wildcard-trust` | Role trust policies don't allow a wildcard principal without a condition. | `aws_iam_role.assume_role_policy` (`Principal` / `Principal.AWS` = `*`, `Condition`) | **FAIL** if principal is `*`/`AWS:*` with no `Condition`. | Yes |
+| **IAM-02** | Strong Password Policy and Procedures | `iam/account-password-policy` | Account password policy exists and meets thresholds (min length ≥ 14; require upper/lower/number/symbol; reuse-prevention ≥ 24; max-age ≤ 90). Thresholds are config. | `aws_iam_account_password_policy.*` | **FAIL** if absent or any threshold weaker than configured. | Yes |
+| **IAM-15** | Passwords Management | *(covered by `iam/account-password-policy`)* | Same evidence as IAM-02; reported jointly, cross-referenced. | `aws_iam_account_password_policy.*` | Mirrors IAM-02. | Yes |
+| **IAM-14** | Strong Authentication | `iam/mfa-enforcement-present` | An MFA-enforcing policy condition (`aws:MultiFactorAuthPresent`) is present on privileged access. | IAM policy documents with a `Bool`/`BoolIfExists` MFA condition | **PASS** if MFA-enforcement condition found; **NA** (reason: per-principal MFA enrollment is account runtime state) if none can be found. | Partial |
+| **IAM-03** | Identity Inventory | `iam/na-runtime-inventory` | — | — | **NA** — a complete identity inventory requires enumerating live account principals; an IaC module is not authoritative for all identities. *(Becomes checkable in the cloud-snapshot lane.)* | NA |
+| **IAM-08** | User Access Review | `iam/na-process-control` | — | — | **NA** — periodic access-review is a temporal/process control with no signal in declarative infrastructure. | NA |
+
+---
+
+## LOG — Logging & Monitoring
+
+| CCM ID | Control Title (CCM v4.0) | Check ID | What the scanner checks | Evidence source (AWS / Terraform) | Verdict logic | Coverage |
+|---|---|---|---|---|---|---|
+| **LOG-07** | Logging Scope | `log/cloudtrail-multi-region` | A CloudTrail trail exists and is multi-region with global service events. | `aws_cloudtrail.is_multi_region_trail`, `.include_global_service_events` | **FAIL** if no trail, or no trail is multi-region. | Yes |
+| **LOG-02** | Audit Logs Protection | `log/cloudtrail-log-validation` | CloudTrail log-file validation is on, and the log bucket is encrypted and non-public. | `aws_cloudtrail.enable_log_file_validation`; log bucket SSE + `aws_s3_bucket_public_access_block` | **FAIL** if validation off/absent, or log bucket unencrypted/public. | Yes |
+| **LOG-04** | Audit Logs Access and Accountability | `log/cloudtrail-accountability` | Trail delivers to CloudWatch Logs and the log bucket has server access logging. | `aws_cloudtrail.cloud_watch_logs_group_arn`; `aws_s3_bucket_logging` on log bucket | **FAIL** if no CloudWatch Logs integration and no access logging on the log bucket. | Partial |
+| **LOG-03** | Security Monitoring and Alerting | `log/vpc-flow-logs` | Every VPC has an associated VPC Flow Log (the IaC-visible monitoring signal). | `aws_flow_log` referencing each `aws_vpc` | **FAIL** if a VPC has no flow log. *(Alarm/response tuning is runtime — noted, not asserted.)* | Partial |
+| **LOG-05** | Audit Logs Monitoring and Response | `log/na-operational` | — | — | **NA** — monitoring-and-response is an operational activity, not a declarative artifact. | NA |
+| **LOG-06** | Clock Synchronization | `log/na-host-runtime` | — | — | **NA** — NTP/clock sync is host/runtime configuration, not expressed in the infrastructure graph. | NA |
+
+---
+
+## CEK — Cryptography, Encryption & Key Management
+
+| CCM ID | Control Title (CCM v4.0) | Check ID | What the scanner checks | Evidence source (AWS / Terraform) | Verdict logic | Coverage |
+|---|---|---|---|---|---|---|
+| **CEK-03** | Data Encryption | `cek/encryption-at-rest` | All in-scope storage encrypts at rest. | `aws_s3_bucket_server_side_encryption_configuration`; `aws_ebs_volume.encrypted`; `aws_db_instance.storage_encrypted`; `aws_rds_cluster.storage_encrypted`; `aws_dynamodb_table.server_side_encryption` | **FAIL** if any in-scope storage resource lacks encryption at rest. | Yes |
+| **CEK-03** | Data Encryption *(in transit)* | `cek/tls-enforced` | S3 buckets deny non-TLS access. | `aws_s3_bucket_policy` with `Deny` on `aws:SecureTransport = false` | **FAIL** if a bucket has no TLS-enforcing deny statement. | Yes |
+| **CEK-04** | Encryption Algorithm | `cek/approved-algorithms` | SSE algorithm and TLS policies are on the approved list (no deprecated TLS on listeners; SSE uses an allowed algorithm/KMS where required). | `...sse_algorithm`; `aws_lb_listener.ssl_policy` | **FAIL** if a disallowed SSE algorithm or a deprecated/weak `ssl_policy` (e.g. permits TLS 1.0/1.1) is used. Allowlist is config. | Yes |
+| **CEK-12** | Key Rotation | `cek/kms-key-rotation` | Customer-managed symmetric KMS keys have automatic rotation enabled. | `aws_kms_key.enable_key_rotation` | **FAIL** if any customer-managed CMK has rotation disabled/unset. | Yes |
+| **CEK-01** | Encryption and Key Management Policy and Procedures | `cek/na-governance` | — | — | **NA** — a policy-and-procedures document is governance, not infrastructure. | NA |
+| **CEK-14** | Key Destruction | `cek/na-lifecycle-runtime` | — | — | **NA** — key destruction is a runtime lifecycle operation; `deletion_window_in_days` hints at intent but does not evidence destruction. | NA |
+
+---
+
+## IVS — Infrastructure & Virtualization Security (network security slice)
+
+| CCM ID | Control Title (CCM v4.0) | Check ID | What the scanner checks | Evidence source (AWS / Terraform) | Verdict logic | Coverage |
+|---|---|---|---|---|---|---|
+| **IVS-03** | Network Security | `ivs/no-open-admin-ports` | No security-group ingress from `0.0.0.0/0` or `::/0` to sensitive/admin ports (22, 3389, 3306, 5432, 1433, 27017, 6379), and no rule opening all ports to the world. | `aws_security_group.ingress`, `aws_security_group_rule`, `aws_vpc_security_group_ingress_rule` | **FAIL** if any world-open ingress hits a sensitive port or all ports. Port list is config. | Yes |
+| **IVS-03** | Network Security *(exposure)* | `ivs/s3-public-access-block` | S3 buckets have all four public-access-block flags enabled; RDS is not publicly accessible. | `aws_s3_bucket_public_access_block.*`; `aws_db_instance.publicly_accessible` | **FAIL** if a bucket lacks a full public-access block, or an RDS instance is publicly accessible. | Yes |
+| **IVS-06** | Segmentation and Segregation | `ivs/default-sg-locked-down` | The default security group carries no ingress/egress rules; workloads use purpose-built SGs. | `aws_default_security_group` (empty `ingress`/`egress`) | **FAIL** if the default SG defines any rule. | Yes |
+| **IVS-04** | OS Hardening and Base Controls | `ivs/na-host-config` | — | — | **NA** — OS/AMI hardening lives inside the image/host, below the infrastructure graph. | NA |
+| **IVS-08** | Network Architecture Documentation | `ivs/na-documentation` | — | — | **NA** — a documentation deliverable, not a checkable resource attribute. | NA |
+
+---
+
+## Summary of the initial curated subset
+
+- **Checkable (Yes/Partial), evidenced by checks:** IAM-05, IAM-16, IAM-02
+  (+IAM-15), IAM-14; LOG-07, LOG-02, LOG-04, LOG-03; CEK-03 (at rest + in
+  transit), CEK-04, CEK-12; IVS-03 (ports + exposure), IVS-06.
+- **Explicitly Not-Applicable, with reasons:** IAM-03, IAM-08; LOG-05, LOG-06;
+  CEK-01, CEK-14; IVS-04, IVS-08.
+
+This is a deliberate slice across four CCM domains, chosen so that (a) every
+"Yes" check has a crisp, demonstrable Terraform signal with a matching
+non-compliant fixture, and (b) the "NA" rows make the boundary of IaC-based
+assessment explicit rather than papering over it. It is **not** an attempt to
+implement all of CCM.

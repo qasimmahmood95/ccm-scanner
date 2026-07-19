@@ -1,0 +1,58 @@
+{
+  "name": "ccm-scanner",
+  "version": "0.1.0",
+  "description": "Read-only compliance scanner that audits Terraform (HCL/plan JSON) or a read-only cloud snapshot against a curated subset of the CSA Cloud Controls Matrix (CCM v4.0) and emits an audit-ready report.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Qasim Mahmood",
+  "keywords": [
+    "ccm",
+    "cloud-controls-matrix",
+    "csa",
+    "compliance",
+    "terraform",
+    "iac",
+    "security",
+    "audit"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ccm-scanner": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "docs/control-mapping.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "scan": "tsx src/index.ts",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.19.0",
+    "vitest": "^3.0.0"
+  }
+}
