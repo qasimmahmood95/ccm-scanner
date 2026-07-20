@@ -53,6 +53,17 @@ const APPROVED_SSE_ALGORITHMS = new Set(["aws:kms", "aws:kms:dsse", "AES256"]);
 
 const SSE_CONFIG_TYPE = "aws_s3_bucket_server_side_encryption_configuration";
 
+/** AWS partitions an S3 ARN can name. */
+const S3_PARTITIONS = ["aws", "aws-cn", "aws-us-gov", "aws-iso", "aws-iso-b"] as const;
+
+/** Why a correlator could not be resolved — the reason must not misdescribe it. */
+type Cause = "unknown" | "unreadable";
+
+interface Unresolvable {
+  readonly what: string;
+  readonly cause: Cause;
+}
+
 /**
  * A correlation over bucket *names*, which is how S3's satellite resources
  * point at their bucket.
@@ -62,14 +73,6 @@ const SSE_CONFIG_TYPE = "aws_s3_bucket_server_side_encryption_configuration";
  * would fail a bucket that is in fact encrypted, so unresolvable correlators
  * are tracked and make the answer not-applicable rather than a Fail.
  */
-/** Why a correlator could not be resolved — the reason must not misdescribe it. */
-type Cause = "unknown" | "unreadable";
-
-interface Unresolvable {
-  readonly what: string;
-  readonly cause: Cause;
-}
-
 interface Correlation {
   readonly names: ReadonlySet<string>;
   readonly unresolvable: readonly Unresolvable[];
@@ -258,13 +261,11 @@ export function deniesInsecureTransport(statement: PolicyStatement, bucketName: 
   }
   // A deny scoped to some other bucket, or to one prefix of this one, does not
   // enforce TLS for this bucket's objects — and claiming it does would be a
-  // Pass on an assertion we never made. Matched suffix-wise so GovCloud and
-  // China partitions (`aws-us-gov`, `aws-cn`) are not falsely failed.
-  return statement.resources.some(
-    (resource) =>
-      resource === "*" ||
-      (resource.startsWith("arn:aws") && resource.endsWith(`:s3:::${bucketName}/*`)),
-  );
+  // Pass on an assertion we never made. Every real partition is enumerated so
+  // GovCloud and China are not falsely failed, without accepting an ARN whose
+  // partition does not exist.
+  const objectArns = S3_PARTITIONS.map((partition) => `arn:${partition}:s3:::${bucketName}/*`);
+  return statement.resources.some((resource) => resource === "*" || objectArns.includes(resource));
 }
 
 /** CEK-03 — Data Encryption (in transit). */

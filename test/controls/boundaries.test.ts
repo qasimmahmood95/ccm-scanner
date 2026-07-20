@@ -106,6 +106,22 @@ describe("iam/no-wildcard-allow", () => {
     const input = model(policyResource("aws_iam_policy.p", statement({}), true));
     expect(statusOf("iam/no-wildcard-allow", input)).toBe("not_applicable");
   });
+
+  // Both yield not_applicable, so only the reason distinguishes them — and the
+  // reason is what an auditor reads.
+  it("says why it declined: unreadable versus simply empty", () => {
+    const missing = run(
+      "iam/no-wildcard-allow",
+      model(policyResource("aws_iam_policy.p", { Version: "2012-10-17" })),
+    )[0]?.reason;
+    const empty = run(
+      "iam/no-wildcard-allow",
+      model(policyResource("aws_iam_policy.p", { Version: "2012-10-17", Statement: [] })),
+    )[0]?.reason;
+
+    expect(missing).toContain("could not be parsed");
+    expect(empty).toContain("declares no statements");
+  });
 });
 
 describe("iam/no-wildcard-trust", () => {
@@ -186,6 +202,62 @@ describe("iam/no-wildcard-trust", () => {
     ).toBe("fail");
   });
 
+  // Named explicitly in the mapping row, so it must stay pinned.
+  it("passes an external-id condition", () => {
+    expect(
+      statusOf(
+        "iam/no-wildcard-trust",
+        role({
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: "*",
+              Condition: { StringEquals: { "sts:ExternalId": "shared-secret-id" } },
+            },
+          ],
+        }),
+      ),
+    ).toBe("pass");
+  });
+
+  // aws:PrincipalArn is present on every authenticated request, so IfExists
+  // behaves like its base operator here — rejecting it would invent an NA.
+  it("passes an IfExists condition on an always-present key", () => {
+    expect(
+      statusOf(
+        "iam/no-wildcard-trust",
+        role({
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: "*",
+              Condition: {
+                ArnLikeIfExists: { "aws:PrincipalArn": "arn:aws:iam::123456789012:role/app" },
+              },
+            },
+          ],
+        }),
+      ),
+    ).toBe("pass");
+  });
+
+  it("passes a specific source CIDR", () => {
+    expect(
+      statusOf(
+        "iam/no-wildcard-trust",
+        role({
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: "*",
+              Condition: { IpAddress: { "aws:SourceIp": "203.0.113.0/24" } },
+            },
+          ],
+        }),
+      ),
+    ).toBe("pass");
+  });
+
   it("passes a principal tag condition, which AWS always writes with a key suffix", () => {
     expect(
       statusOf(
@@ -213,6 +285,25 @@ describe("iam/no-wildcard-trust", () => {
     ["an any-account ARN pattern", { StringLike: { "aws:PrincipalArn": "arn:aws:iam::*:role/*" } }],
     ["a wildcard value", { StringEquals: { "aws:PrincipalAccount": "*" } }],
     ["an open CIDR", { IpAddress: { "aws:SourceIp": "0.0.0.0/0" } }],
+    ["a negated CIDR", { NotIpAddress: { "aws:SourceIp": "10.0.0.0/8" } }],
+    // AWS ORs the values of one key, so the union is as wide as its widest
+    // member: adding a narrow value beside an open one must not improve the
+    // verdict.
+    [
+      "an open CIDR beside a real one",
+      { IpAddress: { "aws:SourceIp": ["0.0.0.0/0", "203.0.113.0/24"] } },
+    ],
+    [
+      "an any-account ARN beside a specific one",
+      {
+        StringLike: {
+          "aws:PrincipalArn": ["arn:aws:iam::*:role/*", "arn:aws:iam::123456789012:role/app"],
+        },
+      },
+    ],
+    // ...IfExists is true when the key is absent, and a principal outside any
+    // organisation has no aws:PrincipalOrgID at all.
+    ["an IfExists org guard", { StringEqualsIfExists: { "aws:PrincipalOrgID": "o-abc123" } }],
   ];
   for (const [name, condition] of vacuous) {
     it(`is not_applicable for a wildcard principal under ${name}`, () => {
@@ -255,6 +346,14 @@ describe("iam/mfa-enforcement-present", () => {
       "Deny",
       { StringEquals: { "aws:MultiFactorAuthPresent": "false" } },
       "not_applicable",
+    ],
+    // Policy authors write booleans in either case; the parser lowercases
+    // values so the comparison must not be case-sensitive.
+    [
+      "a capitalised boolean value",
+      "Deny",
+      { Bool: { "aws:MultiFactorAuthPresent": "False" } },
+      "pass",
     ],
   ];
 
@@ -522,6 +621,20 @@ describe("cek/encryption-at-rest", () => {
   it("fails an unencrypted EBS volume", () => {
     const volume = resource("aws_ebs_volume.v", "aws_ebs_volume", { encrypted: false });
     expect(statusOf("cek/encryption-at-rest", model(volume))).toBe("fail");
+  });
+
+  // The absent/unknown split is the whole reason readAttribute exists: absent
+  // means the operator did not ask for encryption, unknown means we cannot see.
+  it("fails an absent encrypted flag but declines an unknown one", () => {
+    const absent = resource("aws_ebs_volume.v", "aws_ebs_volume", {});
+    const nulled = resource("aws_ebs_volume.v", "aws_ebs_volume", { encrypted: null });
+    const unknown = resource("aws_ebs_volume.v", "aws_ebs_volume", { encrypted: null }, [
+      "encrypted",
+    ]);
+
+    expect(statusOf("cek/encryption-at-rest", model(absent))).toBe("fail");
+    expect(statusOf("cek/encryption-at-rest", model(nulled))).toBe("fail");
+    expect(statusOf("cek/encryption-at-rest", model(unknown))).toBe("not_applicable");
   });
 });
 

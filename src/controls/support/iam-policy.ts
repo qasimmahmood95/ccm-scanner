@@ -194,12 +194,28 @@ const NEGATING_OPERATORS = new Set([
   "notipaddress",
 ]);
 
-/** Values that match any principal, so a condition carrying only these is vacuous. */
+/** Values that match any principal, so a condition carrying one is vacuous. */
 function isVacuousValue(value: string): boolean {
   return value === "" || value === "*" || value === "0.0.0.0/0" || value === "::/0"
     ? true
     : isWildcardPrincipal(value);
 }
+
+/**
+ * Keys that are simply *absent* from the request context for some principals —
+ * an account outside an organisation has no `aws:PrincipalOrgID`. An
+ * `...IfExists` operator evaluates true when the key is absent, so pairing the
+ * two admits exactly the principals the condition was meant to exclude.
+ *
+ * Keys always present on an authenticated request (`aws:PrincipalArn`,
+ * `aws:userid`) are deliberately not listed: there `...IfExists` behaves like
+ * its base operator, and rejecting it would invent a not-applicable.
+ */
+const OPTIONAL_PRINCIPAL_KEYS = new Set([
+  "aws:principalorgid",
+  "aws:principalorgpaths",
+  "sts:externalid",
+]);
 
 /**
  * Whether a condition genuinely narrows who may act.
@@ -224,7 +240,19 @@ export function constrainsPrincipal(statement: PolicyStatement): boolean {
     if (NEGATING_OPERATORS.has(condition.operator) || condition.operator === "null") {
       return false;
     }
-    return condition.values.length > 0 && !condition.values.every(isVacuousValue);
+    // `StringEqualsIfExists aws:PrincipalOrgID` admits every principal that has
+    // no organisation at all — a guard that does not guard.
+    if (
+      condition.operator.endsWith("ifexists") &&
+      (OPTIONAL_PRINCIPAL_KEYS.has(condition.key) || condition.key.startsWith("aws:principaltag/"))
+    ) {
+      return false;
+    }
+    // AWS ORs the values of one operator/key pair, so the condition is only as
+    // narrow as its *widest* value: one open CIDR beside a real one still
+    // admits everyone. Hence `some`, not `every` — and the length guard is
+    // load-bearing here, since `[].some()` is false.
+    return condition.values.length > 0 && !condition.values.some(isVacuousValue);
   });
 }
 
