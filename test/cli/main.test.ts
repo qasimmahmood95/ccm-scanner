@@ -90,6 +90,28 @@ describe("help and version", () => {
     });
   }
 
+  // commander writes the real reason to stderr and throws an error carrying
+  // only the placeholder "(outputHelp)", so reporting the error's message left
+  // the user with a meaningless string.
+  it("help <unknown> reports usage rather than commander's placeholder", () => {
+    expect(main(["help", "bogus"])).toBe(2);
+    const reported = stderr.join("");
+    expect(reported).toContain("Usage:");
+    expect(reported).not.toContain("(outputHelp)");
+  });
+
+  // commander derives its exit code from the ambient process.exitCode.
+  it("is unaffected by an exit code the caller already set", () => {
+    const before = process.exitCode;
+    process.exitCode = 1;
+    try {
+      expect(main(["help"])).toBe(0);
+      expect(stderr.join("")).toBe("");
+    } finally {
+      process.exitCode = before;
+    }
+  });
+
   it("scan --help prints the scan help, not the root help", () => {
     expect(main(["scan", "--help"])).toBe(0);
     const printed = stdout.join("");

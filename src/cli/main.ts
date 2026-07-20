@@ -119,6 +119,7 @@ function scan(flags: RawScanFlags): number {
 
 export function main(argv: readonly string[]): number {
   const manifest = readManifest();
+  let captured = "";
   const program = new Command()
     .name(manifest.name)
     .description("Read-only CCM v4.0 compliance scanner for Terraform")
@@ -129,7 +130,15 @@ export function main(argv: readonly string[]): number {
     // Errors come back to us rather than calling process.exit, so every misuse
     // exits through one path with one shape.
     .exitOverride()
-    .configureOutput({ writeErr: () => undefined });
+    // Captured rather than discarded: commander writes the *reason* here, and
+    // for `help <unknown>` the thrown error carries only the placeholder
+    // "(outputHelp)". Suppressing this and then reporting the error's message
+    // left the user with a meaningless string.
+    .configureOutput({
+      writeErr: (str) => {
+        captured += str;
+      },
+    });
 
   let code = 0;
   program
@@ -145,39 +154,53 @@ export function main(argv: readonly string[]): number {
       code = scan(flags);
     });
 
+  // commander derives its own exit code from the ambient `process.exitCode`,
+  // so a caller that had already set one would see a successful `--help`
+  // reported as a failure. Neutralised for the parse and restored after, which
+  // keeps `main` a function of its arguments alone.
+  const ambientExitCode = process.exitCode;
+  process.exitCode = 0;
   try {
-    program.parse([...argv], { from: "user" });
-  } catch (error) {
-    // commander throws for --help and --version too, and neither is a failure.
-    // It has *already* written them to stdout by this point — only stderr is
-    // suppressed above — so printing anything here duplicates the output, and
-    // for `scan --help` appends the wrong (root) help document.
-    // commander uses `commander.help` for both `--help` (success) and
-    // `help <unknown>` (an error whose message it wrote to the stderr we
-    // suppress). Its own exit code is what distinguishes them; assuming the
-    // code alone means success made an unknown subcommand silent and 0.
-    const { code: commanderCode, exitCode: commanderExit } = error as {
-      code?: string;
-      exitCode?: number;
-    };
-    const isHelpOrVersion =
-      commanderCode === "commander.helpDisplayed" ||
-      commanderCode === "commander.help" ||
-      commanderCode === "commander.version";
-    if (isHelpOrVersion && (commanderExit ?? 0) === 0) {
-      return 0;
-    }
-    if (error instanceof UsageError) {
-      process.stderr.write(`${error.message}\n`);
+    return parse();
+  } finally {
+    process.exitCode = ambientExitCode;
+  }
+
+  function parse(): number {
+    try {
+      program.parse([...argv], { from: "user" });
+    } catch (error) {
+      // commander throws for --help and --version too, and neither is a
+      // failure. It has *already* written them to stdout by this point, so
+      // printing anything here duplicates the output and, for `scan --help`,
+      // appends the wrong (root) help document. It also uses the same
+      // `commander.help` code for a successful `--help` and for
+      // `help <unknown>`, whose real message goes to the stderr we capture.
+      const { code: commanderCode, exitCode: commanderExit } = error as {
+        code?: string;
+        exitCode?: number;
+      };
+      const isHelpOrVersion =
+        commanderCode === "commander.helpDisplayed" ||
+        commanderCode === "commander.help" ||
+        commanderCode === "commander.version";
+      // Whether commander wrote to stderr is the reliable signal, since its own
+      // exitCode is derived from the ambient process.exitCode.
+      if (isHelpOrVersion && captured === "" && (commanderExit ?? 0) === 0) {
+        return 0;
+      }
+
+      if (error instanceof UsageError) {
+        process.stderr.write(`${error.message}\n`);
+        return EXIT_USAGE;
+      }
+      const reported =
+        captured !== "" ? captured : `${error instanceof Error ? error.message : String(error)}\n`;
+      process.stderr.write(`${reported}Run \`${manifest.name} scan --help\` for usage.\n`);
       return EXIT_USAGE;
     }
-    process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-        `Run \`${manifest.name} scan --help\` for usage.\n`,
-    );
-    return EXIT_USAGE;
+    return code;
   }
-  return code;
 }
 
 /** Entry: a bare invocation explains the tool; anything else is parsed. */

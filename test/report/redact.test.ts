@@ -267,6 +267,25 @@ describe("redactSensitive", () => {
     ).not.toThrow();
   });
 
+  // The walk state is per evidence entry. Sharing it across entries would let
+  // one resource's redaction decision stand in for another's, whose sensitive
+  // attributes are different — a cross-resource leak.
+  it("does not carry one resource's redaction decision to another", () => {
+    const shared = { token: "secret-token", note: "fine" };
+    const verdicts = [
+      verdict([
+        { resourceAddress: "aws_db_instance.a", attribute: "settings", observed: shared },
+        { resourceAddress: "aws_db_instance.b", attribute: "settings", observed: shared },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.a", ["note"]), resource("aws_db_instance.b", ["token"])),
+    );
+    expect(redacted?.evidence[0]?.observed).toEqual({ token: "secret-token", note: REDACTED });
+    expect(redacted?.evidence[1]?.observed).toEqual({ token: REDACTED, note: "fine" });
+  });
+
   it("preserves the rest of the verdict", () => {
     const original = verdict([
       { resourceAddress: "aws_db_instance.main", attribute: "password", observed: "hunter2" },

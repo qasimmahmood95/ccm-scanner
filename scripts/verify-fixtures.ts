@@ -13,7 +13,8 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const CLI = "dist/cli/index.js";
 const COMPLIANT = "fixtures/compliant/terraform-plan.json";
@@ -132,6 +133,27 @@ check(
   scanHelp.status === 0 &&
     scanHelp.stdout.split("Usage:").length === 2 &&
     scanHelp.stdout.includes("--fail-on"),
+);
+
+// --- the shim actually runs when imported as a program ----------------------
+// MB-A: a guard on process.argv[1] made the npm-installed binary a silent
+// no-op, because npm installs the bin as a symlink and Node realpaths
+// import.meta.url but not argv[1]. Importing the shim from a *different* entry
+// point reproduces that divergence without needing a symlink, so the blocker
+// cannot come back green.
+const imported = spawnSync(
+  process.execPath,
+  [
+    "--input-type=module",
+    "-e",
+    `await import(${JSON.stringify(pathToFileURL(resolve(CLI)).href)})`,
+  ],
+  { encoding: "utf8" },
+);
+check(
+  "the shim runs when its module URL differs from argv[1]",
+  imported.stdout.includes("scan --help"),
+  `stdout ${String(imported.stdout.length)}B`,
 );
 
 // --- the pack is byte-reproducible for a fixed input and timestamp ----------
