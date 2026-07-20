@@ -179,6 +179,16 @@ describe("untrusted values from scanned infrastructure", () => {
     expect(summary).not.toContain(ps);
   });
 
+  // A <details> or hidden <div> in a reason would make every following section
+  // a collapsed/invisible descendant of it.
+  it("neutralises inline HTML in a reason", () => {
+    const verdict = verdictOf(IVS_03, notApplicable('<div style="display:none">swallow'));
+    const summary = renderSummary(buildReport([verdict], fixedMetadata));
+
+    expect(summary).not.toContain("<div");
+    expect(summary).toContain("&lt;div");
+  });
+
   it("keeps the metadata table intact when a field contains a carriage return", () => {
     const cr = String.fromCharCode(13);
     const summary = renderSummary(
@@ -189,6 +199,29 @@ describe("untrusted values from scanned infrastructure", () => {
     );
     // header + separator + five data rows, and nothing extra
     expect(summary.split("\n").filter((line) => line.startsWith("|"))).toHaveLength(7);
+  });
+});
+
+// One check routinely emits several findings for one resource — one per ingress
+// rule, say — which tie on control, check, address and status. Array.sort is
+// stable, so without a final discriminator the input order leaks into the bytes.
+describe("verdicts that tie on the primary sort keys", () => {
+  function ruleVerdict(attribute: string) {
+    return verdictOf(
+      IVS_03,
+      fail([{ resourceAddress: "aws_security_group.web", attribute, observed: true }]),
+    );
+  }
+  const ordered = [ruleVerdict("ingress[0]"), ruleVerdict("ingress[1]")];
+  const shuffled = [...ordered].reverse();
+
+  it("renders byte-identically whichever order they arrive in", () => {
+    expect(renderJson(buildReport(shuffled, fixedMetadata))).toBe(
+      renderJson(buildReport(ordered, fixedMetadata)),
+    );
+    expect(renderSummary(buildReport(shuffled, fixedMetadata))).toBe(
+      renderSummary(buildReport(ordered, fixedMetadata)),
+    );
   });
 });
 

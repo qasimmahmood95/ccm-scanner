@@ -145,6 +145,32 @@ describe("verdict validation", () => {
     expect(() => buildReport([verdict], fixedMetadata)).toThrow(/invalid checkId/);
   });
 
+  it("rejects a reason that is present but not a non-empty string", () => {
+    const verdict = {
+      ...control,
+      status: "fail" as const,
+      evidence: [{ resourceAddress: "aws_sg.a", observed: true }],
+      reason: 7 as unknown as string,
+    };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/reason that is not a non-empty/);
+  });
+
+  it("rejects evidence whose attribute is not a string", () => {
+    const verdict = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, attribute: 7 as unknown as string }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/attribute is not a string/);
+  });
+
+  it("rejects evidence whose expected is not a string", () => {
+    const verdict = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, expected: null as unknown as string }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/expected is not a string/);
+  });
+
   it("rejects an unknown status rather than silently counting it as N/A", () => {
     const verdict = {
       ...control,

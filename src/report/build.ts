@@ -93,6 +93,13 @@ function assertVerdictsAreWellFormed(verdicts: readonly Verdict[]): void {
       throw new Error(`${where} has an invalid checkId: ${idProblem}`);
     }
 
+    const checkDomain = verdict.checkId.slice(0, verdict.checkId.indexOf("/")).toUpperCase();
+    if (checkDomain !== domainOfCcmId(verdict.ccmId)) {
+      throw new Error(
+        `${where} is namespaced to ${checkDomain} but its control ${verdict.ccmId} is not`,
+      );
+    }
+
     if (!STATUSES.includes(verdict.status)) {
       throw new Error(`${where} has unknown status "${String(verdict.status)}"`);
     }
@@ -109,9 +116,24 @@ function assertVerdictsAreWellFormed(verdicts: readonly Verdict[]): void {
       throw new Error(`${where} is "${verdict.status}" but carries no evidence`);
     }
 
+    // Present-but-wrong is as invalid as absent: the schema types these as
+    // non-empty strings, and a non-TS caller (a deserialised report, an ingest
+    // adapter) can put anything here.
+    if (verdict.reason !== undefined) {
+      if (typeof verdict.reason !== "string" || verdict.reason.trim() === "") {
+        throw new Error(`${where} has a reason that is not a non-empty string`);
+      }
+    }
+
     for (const item of verdict.evidence) {
       if (typeof item.resourceAddress !== "string" || item.resourceAddress.trim() === "") {
         throw new Error(`${where} has evidence with an empty resourceAddress`);
+      }
+      if (item.attribute !== undefined && typeof item.attribute !== "string") {
+        throw new Error(`${where} has evidence whose attribute is not a string`);
+      }
+      if (item.expected !== undefined && typeof item.expected !== "string") {
+        throw new Error(`${where} has evidence whose expected is not a string`);
       }
     }
   }

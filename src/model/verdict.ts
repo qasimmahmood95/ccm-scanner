@@ -9,6 +9,7 @@
  */
 
 import { compareStrings } from "../util/compare.js";
+import { toJsonSafe } from "../util/json-safe.js";
 
 export type Status = "pass" | "fail" | "not_applicable";
 
@@ -92,16 +93,36 @@ function firstAddress(verdict: Verdict): string {
   return verdict.evidence[0]?.resourceAddress ?? "";
 }
 
+/** Canonical serialisation of a verdict's evidence, used as the final tie-break. */
+function evidenceKey(verdict: Verdict): string {
+  return (
+    JSON.stringify(
+      verdict.evidence.map((item) => [
+        item.resourceAddress,
+        item.attribute ?? "",
+        item.expected ?? "",
+        toJsonSafe(item.observed),
+      ]),
+    ) ?? ""
+  );
+}
+
 /**
- * Total order over verdicts, so a report does not depend on the order checks
- * happened to run in. Shared by the engine and the report builder so the two
- * cannot disagree.
+ * A **total** order over verdicts, so a report never depends on the order
+ * checks happened to emit in.
+ *
+ * The tie-breaks matter: a single check routinely emits several findings for
+ * one resource (one per ingress rule, say), and those agree on control, check,
+ * first address and status. Without a final discriminator `Array.sort`'s
+ * stability would let input order leak into the output bytes.
  */
 export function compareVerdicts(a: Verdict, b: Verdict): number {
   return (
     compareStrings(a.ccmId, b.ccmId) ||
     compareStrings(a.checkId, b.checkId) ||
     compareStrings(firstAddress(a), firstAddress(b)) ||
-    compareStrings(a.status, b.status)
+    compareStrings(a.status, b.status) ||
+    compareStrings(a.reason ?? "", b.reason ?? "") ||
+    compareStrings(evidenceKey(a), evidenceKey(b))
   );
 }

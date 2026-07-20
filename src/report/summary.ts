@@ -30,9 +30,25 @@ function flatten(text: string): string {
   return text.replace(LINE_ENDINGS, " ");
 }
 
+/**
+ * Untrusted text rendered outside a code span.
+ *
+ * Flattening line endings stops structural forgery, but raw inline HTML is a
+ * second route to the same end: an unclosed `<div style="display:none">` or a
+ * `<details>` (allowlisted by GitHub) makes every following section a hidden
+ * descendant. Fields carried inside a code span are already literal; these are
+ * not, so they are escaped.
+ */
+function inlineText(text: string): string {
+  // Only `<` needs escaping. An input of `&lt;details&gt;` already renders as
+  // literal text, so leaving `&` alone opens no bypass and keeps titles such as
+  // "Cryptography, Encryption & Key Management" readable in the raw Markdown.
+  return flatten(text).replace(/</g, "&lt;");
+}
+
 /** Escapes a value for use inside a Markdown table cell. */
 function tableCell(text: string): string {
-  return flatten(text).replace(/\|/g, "\\|");
+  return inlineText(text).replace(/\|/g, "\\|");
 }
 
 /** Wraps text in a fence longer than any backtick run it contains (CommonMark). */
@@ -84,7 +100,7 @@ function reasonsOf(verdicts: readonly Verdict[]): readonly string[] {
   return [
     ...new Set(
       verdicts.flatMap((verdict) =>
-        verdict.reason === undefined ? [] : [flatten(verdict.reason)],
+        verdict.reason === undefined ? [] : [inlineText(verdict.reason)],
       ),
     ),
   ];
@@ -92,7 +108,7 @@ function reasonsOf(verdicts: readonly Verdict[]): readonly string[] {
 
 function renderEvidence(verdict: Verdict, lines: string[]): void {
   if (verdict.reason !== undefined) {
-    lines.push(`Reason: ${flatten(verdict.reason)}`);
+    lines.push(`Reason: ${inlineText(verdict.reason)}`);
     lines.push("");
   }
   for (const item of verdict.evidence) {
@@ -103,7 +119,7 @@ function renderEvidence(verdict: Verdict, lines: string[]): void {
     lines.push(`- ${where}`);
     lines.push(`  - observed: ${codeSpan(formatValue(item.observed))}`);
     if (item.expected !== undefined) {
-      lines.push(`  - expected: ${flatten(item.expected)}`);
+      lines.push(`  - expected: ${inlineText(item.expected)}`);
     }
   }
   if (verdict.evidence.length > 0) {
@@ -118,7 +134,7 @@ function renderControl(status: Status, verdicts: readonly Verdict[], lines: stri
     return;
   }
 
-  lines.push(`### ${STATUS_LABEL[status]} · ${first.ccmId} ${flatten(first.ccmTitle)}`);
+  lines.push(`### ${STATUS_LABEL[status]} · ${first.ccmId} ${inlineText(first.ccmTitle)}`);
   lines.push("");
 
   for (const [checkId, group] of groupByCheck(verdicts)) {
@@ -141,7 +157,7 @@ function renderPassingControl(verdicts: readonly Verdict[], lines: string[]): vo
     return;
   }
 
-  lines.push(`- ${first.ccmId} ${flatten(first.ccmTitle)}`);
+  lines.push(`- ${first.ccmId} ${inlineText(first.ccmTitle)}`);
   for (const [checkId, group] of groupByCheck(verdicts)) {
     const status = statusOfControl(group);
     if (status === "not_applicable") {

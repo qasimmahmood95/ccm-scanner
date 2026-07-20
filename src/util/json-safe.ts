@@ -68,8 +68,13 @@ function coerce(value: unknown, seen: Set<object>): unknown {
     }
     if (value instanceof Map) {
       const out: Record<string, unknown> = {};
+      let index = 0;
       for (const [key, entry] of value) {
-        out[safeString(key)] = coerce(entry, seen);
+        // Two keys that stringify alike must not collapse into one, or evidence
+        // is silently lost.
+        const name = safeString(key);
+        out[Object.hasOwn(out, name) ? `${name} (${String(index)})` : name] = coerce(entry, seen);
+        index += 1;
       }
       return out;
     }
@@ -93,6 +98,9 @@ function coerce(value: unknown, seen: Set<object>): unknown {
       }
     }
     return out;
+  } catch {
+    // Backstop: a revoked Proxy throws even on Array.isArray and instanceof.
+    return UNSERIALISABLE;
   } finally {
     seen.delete(value);
   }
