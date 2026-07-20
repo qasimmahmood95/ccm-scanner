@@ -47,6 +47,22 @@ from the current mapping. See **ADR-0003**.
 
 `Verdict logic` reads as: **FAIL when …**, otherwise **PASS** (unless stated NA).
 
+## Two rules that keep verdicts honest
+
+**Account-scoped absence is NA, not FAIL.** If a control is governed by an
+account-level singleton (password policy, CloudTrail) and the input declares no
+such resource, we report `not_applicable` with a reason. The account may well
+set it outside this Terraform, and we scan the input, not the account — calling
+that a Fail would be inferring non-compliance we cannot evidence (hard
+constraint 5). The reason names exactly what was looked for, so the gap is
+visible rather than buried. The same applies to resource-scoped controls when
+the input declares no resource of that type.
+
+**Unknown-until-apply is NA, not a guess.** Terraform writes a value it cannot
+compute until apply as `null`, which is indistinguishable from "never set".
+Checks must consult `isUnknown()` (populated from `resource_changes[].change.after_unknown`)
+and report `not_applicable` rather than read the `null` as "not configured".
+
 ---
 
 ## IAM — Identity & Access Management
@@ -55,8 +71,8 @@ from the current mapping. See **ADR-0003**.
 |---|---|---|---|---|---|---|
 | **IAM-05** | Least Privilege | `iam/no-wildcard-allow` | No IAM policy `Allow` statement grants `Action:"*"` **and** `Resource:"*"`. | `aws_iam_policy.policy`, `aws_iam_role_policy`, `aws_iam_user_policy`, `aws_iam_group_policy`, `data.aws_iam_policy_document` statements | **FAIL** if any Allow stmt has both action `*` and resource `*`. | Yes |
 | **IAM-16** | Authorization Mechanisms | `iam/no-wildcard-trust` | Role trust policies don't allow a wildcard principal without a condition. | `aws_iam_role.assume_role_policy` (`Principal` / `Principal.AWS` = `*`, `Condition`) | **FAIL** if principal is `*`/`AWS:*` with no `Condition`. | Yes |
-| **IAM-02** | Strong Password Policy and Procedures | `iam/account-password-policy` | Account password policy exists and meets thresholds (min length ≥ 14; require upper/lower/number/symbol; reuse-prevention ≥ 24; max-age ≤ 90). Thresholds are config. | `aws_iam_account_password_policy.*` | **FAIL** if absent or any threshold weaker than configured. | Yes |
-| **IAM-15** | Passwords Management | *(covered by `iam/account-password-policy`)* | Same evidence as IAM-02; reported jointly, cross-referenced. | `aws_iam_account_password_policy.*` | Mirrors IAM-02. | Yes |
+| **IAM-02** | Strong Password Policy and Procedures | `iam/account-password-policy` | Password *strength*: min length ≥ 14, and upper/lower/number/symbol all required. Thresholds are config. | `aws_iam_account_password_policy.minimum_password_length`, `.require_*` | **FAIL** if declared and weaker than configured. **NA** if no policy resource is declared — see *account-scoped absence* below. | Yes |
+| **IAM-15** | Passwords Management | `iam/password-lifecycle` | Password *lifecycle*: reuse prevention ≥ 24 and maximum age ≤ 90 days. Split from IAM-02 because a check carries exactly one control id, so a control sharing another's check would never be reported. | `aws_iam_account_password_policy.password_reuse_prevention`, `.max_password_age` | **FAIL** if declared and weaker than configured. **NA** if no policy resource is declared. | Yes |
 | **IAM-14** | Strong Authentication | `iam/mfa-enforcement-present` | An MFA-enforcing policy condition (`aws:MultiFactorAuthPresent`) is present on privileged access. | IAM policy documents with a `Bool`/`BoolIfExists` MFA condition | **PASS** if MFA-enforcement condition found; **NA** (reason: per-principal MFA enrollment is account runtime state) if none can be found. | Partial |
 | **IAM-03** | Identity Inventory | `iam/na-runtime-inventory` | — | — | **NA** — a complete identity inventory requires enumerating live account principals; an IaC module is not authoritative for all identities. *(Becomes checkable in the cloud-snapshot lane.)* | NA |
 | **IAM-08** | User Access Review | `iam/na-process-control` | — | — | **NA** — periodic access-review is a temporal/process control with no signal in declarative infrastructure. | NA |
