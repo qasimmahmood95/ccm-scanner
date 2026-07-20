@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBanner, readManifest, type Manifest } from "../src/banner.js";
+import { formatBanner, readManifest, type Manifest } from "../../src/cli/banner.js";
 
 const manifest: Manifest = { name: "ccm-scanner", version: "9.9.9" };
 
@@ -21,8 +21,8 @@ describe("formatBanner", () => {
 
 describe("readManifest", () => {
   it("reads this package's real name and semver version", () => {
-    const m = readManifest();
-    expect(m.name).toBe("ccm-scanner");
-    expect(m.version).toMatch(/^\d+\.\d+\.\d+/);
+    const found = readManifest();
+    expect(found.name).toBe("ccm-scanner");
+    expect(found.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 });

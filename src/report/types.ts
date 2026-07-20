@@ -1,0 +1,62 @@
+import type { CcmDomain } from "../model/ccm.js";
+import type { Verdict } from "../model/verdict.js";
+
+/** Bumped when the report JSON shape changes incompatibly. */
+export const REPORT_SCHEMA_VERSION = "1.0.0";
+
+export interface ToolInfo {
+  readonly name: string;
+  readonly version: string;
+}
+
+export interface InputInfo {
+  /** Where the model came from, e.g. `terraform-plan:plan.json`. */
+  readonly source: string;
+  /** sha256 (hex, lowercase) of the input. */
+  readonly digest: string;
+}
+
+export interface RunMetadata {
+  readonly tool: ToolInfo;
+  /** Pinned CCM release, e.g. `v4.0.13` (ADR-0003). */
+  readonly ccmVersion: string;
+  readonly input: InputInfo;
+  /** ISO-8601 timestamp, injected by the caller so reports stay reproducible. */
+  readonly generatedAt: string;
+}
+
+export interface StatusCounts {
+  readonly pass: number;
+  readonly fail: number;
+  readonly notApplicable: number;
+  readonly total: number;
+}
+
+/**
+ * Counts are reported at two granularities, because they answer different
+ * questions and conflating them overstates coverage:
+ *
+ * - **controls** — distinct CCM controls assessed. A control is `fail` if any
+ *   of its findings failed, else `pass` if any passed, else `not_applicable`.
+ *   This is the number an auditor cares about.
+ * - **findings** — individual verdicts, typically one per resource examined.
+ */
+export interface DomainRollup {
+  readonly domain: CcmDomain;
+  readonly controls: StatusCounts;
+  readonly findings: StatusCounts;
+}
+
+/** `fail` when any control failed, otherwise `pass`. Drives the CLI exit code. */
+export type Headline = "pass" | "fail";
+
+export interface Report {
+  readonly schemaVersion: string;
+  readonly metadata: RunMetadata;
+  readonly headline: Headline;
+  readonly controls: StatusCounts;
+  readonly findings: StatusCounts;
+  /** Only domains that produced verdicts, in canonical domain order. */
+  readonly domains: readonly DomainRollup[];
+  readonly verdicts: readonly Verdict[];
+}

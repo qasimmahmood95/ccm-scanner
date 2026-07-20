@@ -1,0 +1,197 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildReport,
+  createRegistry,
+  evaluate,
+  fail,
+  notApplicable,
+  verdictOf,
+  type ControlRef,
+} from "../../src/index.js";
+import { fixedMetadata, stubChecks, stubModel } from "../support/stubs.js";
+
+const report = buildReport(evaluate(createRegistry(stubChecks).select(), stubModel), fixedMetadata);
+
+describe("controls vs findings", () => {
+  // Three controls, but four findings: CEK-03 is assessed against two buckets.
+  // Conflating these would overstate how many controls were assessed.
+  it("counts distinct controls by their rolled-up status", () => {
+    expect(report.controls).toEqual({ pass: 1, fail: 1, notApplicable: 1, total: 3 });
+  });
+
+  it("counts findings separately from controls", () => {
+    expect(report.findings).toEqual({ pass: 2, fail: 1, notApplicable: 1, total: 4 });
+  });
+
+  it("headlines fail when any control fails", () => {
+    expect(report.headline).toBe("fail");
+  });
+
+  it("headlines pass when there are only passes and not-applicables", () => {
+    const control: ControlRef = {
+      ccmId: "IAM-08",
+      ccmTitle: "User Access Review",
+      checkId: "iam/na-process-control",
+    };
+    const clean = buildReport([verdictOf(control, notApplicable("process"))], fixedMetadata);
+    expect(clean.headline).toBe("pass");
+  });
+});
+
+describe("domain roll-ups", () => {
+  it("uses canonical domain order and omits domains with no verdicts", () => {
+    expect(report.domains.map((rollup) => rollup.domain)).toEqual(["IAM", "CEK", "IVS"]);
+  });
+
+  it("separates control and finding counts within a domain", () => {
+    expect(report.domains).toContainEqual({
+      domain: "CEK",
+      controls: { pass: 1, fail: 0, notApplicable: 0, total: 1 },
+      findings: { pass: 2, fail: 0, notApplicable: 0, total: 2 },
+    });
+  });
+
+  // If a verdict were ever dropped from the per-domain view it would still be
+  // counted in the totals, producing a headline with no supporting detail.
+  it("reconciles: domain totals sum to the overall totals", () => {
+    const controls = report.domains.reduce((sum, rollup) => sum + rollup.controls.total, 0);
+    const findings = report.domains.reduce((sum, rollup) => sum + rollup.findings.total, 0);
+    expect(controls).toBe(report.controls.total);
+    expect(findings).toBe(report.findings.total);
+  });
+
+  it("refuses a verdict whose control is outside the in-scope domains", () => {
+    const rogue = verdictOf(
+      { ccmId: "TVM-01", ccmTitle: "Out of scope", checkId: "iam/rogue" },
+      fail([{ resourceAddress: "aws_thing.x", observed: true }]),
+    );
+    expect(() => buildReport([rogue], fixedMetadata)).toThrow(/not an in-scope CCM control id/);
+  });
+});
+
+describe("metadata validation", () => {
+  it("echoes valid metadata verbatim", () => {
+    expect(report.metadata).toEqual(fixedMetadata);
+    expect(report.schemaVersion).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("rejects a digest that is not a sha256 hex string", () => {
+    const metadata = {
+      ...fixedMetadata,
+      input: { ...fixedMetadata.input, digest: "NOT-A-DIGEST" },
+    };
+    expect(() => buildReport([], metadata)).toThrow(/digest/);
+  });
+
+  it("rejects a timestamp that is not ISO-8601 with a timezone", () => {
+    expect(() => buildReport([], { ...fixedMetadata, generatedAt: "2026-07-19 12:00:00" })).toThrow(
+      /generatedAt/,
+    );
+  });
+
+  it("rejects empty tool identification", () => {
+    expect(() =>
+      buildReport([], { ...fixedMetadata, tool: { name: "  ", version: "1.0.0" } }),
+    ).toThrow(/tool\.name/);
+  });
+
+  // The shape regex alone would accept this.
+  it("rejects a well-shaped timestamp that is not a real date", () => {
+    expect(() =>
+      buildReport([], { ...fixedMetadata, generatedAt: "2026-99-99T00:00:00Z" }),
+    ).toThrow(/not a real date/);
+  });
+});
+
+// buildReport is the last gate before a document is emitted, so it must not be
+// able to produce something the published schema would reject.
+describe("verdict validation", () => {
+  const control: ControlRef = {
+    ccmId: "IVS-03",
+    ccmTitle: "Network Security",
+    checkId: "ivs/no-open-admin-ports",
+  };
+
+  it("rejects evidence with an empty resourceAddress", () => {
+    const verdict = verdictOf(control, fail([{ resourceAddress: "  ", observed: true }]));
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/empty resourceAddress/);
+  });
+
+  it("rejects an empty ccmTitle", () => {
+    const verdict = verdictOf(
+      { ...control, ccmTitle: "  " },
+      fail([{ resourceAddress: "aws_sg.a", observed: true }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/empty ccmTitle/);
+  });
+
+  // verdictOf guards the path checks take, but a deserialised report or a
+  // future ingest lane can reach buildReport without passing through it.
+  it("rejects a not_applicable verdict carrying no reason", () => {
+    const verdict = { ...control, status: "not_applicable" as const, evidence: [] };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/carries no reason/);
+  });
+
+  it("rejects a fail verdict carrying no evidence", () => {
+    const verdict = { ...control, status: "fail" as const, evidence: [] };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/carries no evidence/);
+  });
+
+  it("rejects a checkId the registry and schema would both reject", () => {
+    const verdict = verdictOf(
+      { ...control, checkId: "ivs/ivs-03-open-ports" },
+      fail([{ resourceAddress: "aws_sg.a", observed: true }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/invalid checkId/);
+  });
+
+  it("rejects a reason that is present but not a non-empty string", () => {
+    const verdict = {
+      ...control,
+      status: "fail" as const,
+      evidence: [{ resourceAddress: "aws_sg.a", observed: true }],
+      reason: 7 as unknown as string,
+    };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/reason that is not a non-empty/);
+  });
+
+  it("rejects evidence whose attribute is not a string", () => {
+    const verdict = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, attribute: 7 as unknown as string }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/attribute is not a non-empty/);
+  });
+
+  it("rejects evidence whose expected is not a string", () => {
+    const verdict = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, expected: null as unknown as string }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/expected is not a non-empty/);
+  });
+
+  // An empty attribute would render as a present-but-blank key while an absent
+  // one is omitted, so the two must not be allowed to look alike.
+  it("rejects an empty attribute or expected, not just a missing one", () => {
+    const emptyAttribute = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, attribute: "" }]),
+    );
+    const emptyExpected = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, expected: "  " }]),
+    );
+    expect(() => buildReport([emptyAttribute], fixedMetadata)).toThrow(/attribute/);
+    expect(() => buildReport([emptyExpected], fixedMetadata)).toThrow(/expected/);
+  });
+
+  it("rejects an unknown status rather than silently counting it as N/A", () => {
+    const verdict = {
+      ...control,
+      status: "maybe" as unknown as "pass",
+      evidence: [{ resourceAddress: "aws_sg.a", observed: true }],
+    };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/unknown status/);
+  });
+});
