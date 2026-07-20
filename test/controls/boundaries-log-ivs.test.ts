@@ -1015,6 +1015,159 @@ describe("regressions found by the M4 third review round", () => {
   });
 });
 
+describe("regressions found by the M4 fourth review round", () => {
+  // MB-A. Narrowing asText made an empty correlator "unreadable", which
+  // blocked every subject of that type — one malformed satellite turned every
+  // evidenced Fail in the input into a not-applicable. A key that is empty or
+  // absent names no subject and never will, so it is evidence about none.
+  it("still fails an uncovered bucket when another satellite's key is empty", () => {
+    const input = model(
+      resource("aws_s3_bucket.plain", "aws_s3_bucket", { bucket: "plain" }),
+      resource("aws_s3_bucket_public_access_block.broken", "aws_s3_bucket_public_access_block", {
+        bucket: "",
+        block_public_acls: true,
+      }),
+    );
+    const finding = run("ivs/s3-public-access-block", input)[0];
+    expect(finding?.status).toBe("fail");
+  });
+
+  it("still fails an uncovered VPC when another flow log's vpc_id is empty", () => {
+    const input = model(
+      resource("aws_vpc.main", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_flow_log.broken", "aws_flow_log", { vpc_id: "" }),
+    );
+    expect(statusOf("log/vpc-flow-logs", input)).toBe("fail");
+  });
+
+  // An unknown correlator is different in kind: it may still turn out to name
+  // this subject, so it must keep blocking.
+  it("still declines when another satellite's key is unknown until apply", () => {
+    const input = model(
+      resource("aws_s3_bucket.plain", "aws_s3_bucket", { bucket: "plain" }),
+      resource(
+        "aws_s3_bucket_public_access_block.pending",
+        "aws_s3_bucket_public_access_block",
+        { bucket: null },
+        ["bucket"],
+      ),
+    );
+    expect(statusOf("ivs/s3-public-access-block", input)).toBe("not_applicable");
+  });
+
+  // SF-D. Whitespace is MB-1 with spaces instead of nothing.
+  it("fails a trail whose CloudWatch ARN is only whitespace", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", cloud_watch_logs_group_arn: "   " }),
+      bucket(),
+    );
+    expect(statusOf("log/cloudtrail-accountability", input)).toBe("fail");
+  });
+
+  // SF-C. Two trails sharing a log bucket must not produce byte-identical
+  // verdicts, and the CloudWatch half must be shown as examined.
+  it("names the trail in LOG-04's evidence, not only the bucket's satellite", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs" }),
+      bucket(),
+      resource("aws_s3_bucket_logging.logs", "aws_s3_bucket_logging", { bucket: "logs" }),
+    );
+    const evidence = run("log/cloudtrail-accountability", input)[0]?.evidence ?? [];
+    const cited = evidence.map((item) => item.resourceAddress);
+    expect(cited).toContain("aws_cloudtrail.main");
+    expect(cited).toContain("aws_s3_bucket_logging.logs");
+  });
+
+  // M5. Every satellite is kept, not just the last one seen.
+  it("cites every satellite when two configure the same subject", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs" }),
+      bucket(),
+      resource("aws_s3_bucket_logging.a", "aws_s3_bucket_logging", { bucket: "logs" }),
+      resource("aws_s3_bucket_logging.b", "aws_s3_bucket_logging", { bucket: "logs" }),
+    );
+    const cited = (run("log/cloudtrail-accountability", input)[0]?.evidence ?? []).map(
+      (item) => item.resourceAddress,
+    );
+    expect(cited).toContain("aws_s3_bucket_logging.a");
+    expect(cited).toContain("aws_s3_bucket_logging.b");
+  });
+
+  // M4. A satellite is never described as holding the logs.
+  it("does not describe a satellite as holding the logs when the bucket is elsewhere", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", enable_log_file_validation: true }),
+      sse(),
+      fullBlock(),
+    );
+    const evidence = run("log/cloudtrail-log-validation", input)[0]?.evidence ?? [];
+    for (const item of evidence.filter((entry) => entry.attribute === "bucket")) {
+      expect(String(item.observed)).not.toContain("holds the logs");
+    }
+  });
+
+  // SF-A. Two groups adopting one VPC cover one VPC between them.
+  it("does not let two groups adopting the same VPC absorb a second VPC", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_vpc.b", "aws_vpc", { id: null }, ["id"]),
+      resource("aws_default_security_group.one", "aws_default_security_group", {
+        vpc_id: "vpc-a",
+        ingress: [],
+        egress: [],
+      }),
+      resource("aws_default_security_group.two", "aws_default_security_group", {
+        vpc_id: "vpc-a",
+        ingress: [],
+        egress: [],
+      }),
+    );
+    expect(statusesOf("ivs/default-sg-locked-down", input)).toEqual([
+      "pass",
+      "pass",
+      "not_applicable",
+    ]);
+  });
+
+  // M10. A group adopting a declared VPC does offset it.
+  it("lets a group adopting a declared VPC offset that VPC", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_vpc.b", "aws_vpc", { id: null }, ["id"]),
+      resource("aws_default_security_group.one", "aws_default_security_group", {
+        vpc_id: "vpc-a",
+        ingress: [],
+        egress: [],
+      }),
+      resource(
+        "aws_default_security_group.two",
+        "aws_default_security_group",
+        { vpc_id: null, ingress: [], egress: [] },
+        ["vpc_id"],
+      ),
+    );
+    expect(statusesOf("ivs/default-sg-locked-down", input)).toEqual(["pass", "pass"]);
+  });
+
+  // SF-B. vpc_id is Optional — omitting it adopts the default VPC's group, so
+  // the reason must not call that unreadable.
+  it("says a group declares no vpc_id rather than calling it unreadable", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_vpc.b", "aws_vpc", { id: "vpc-b" }),
+      resource("aws_default_security_group.one", "aws_default_security_group", {
+        ingress: [],
+        egress: [],
+      }),
+    );
+    const finding = run("ivs/default-sg-locked-down", input).find(
+      (item) => item.status === "not_applicable",
+    );
+    expect(finding?.reason).toContain("declares no vpc_id");
+    expect(finding?.reason).not.toContain("could not be read");
+  });
+});
+
 describe("every LOG and IVS check", () => {
   it("gives a reason with every not-applicable verdict", () => {
     const empty = model();

@@ -71,17 +71,6 @@ export function describeUnresolvable(entries: readonly Unresolvable[]): string {
 }
 
 /**
- * What an *absent* key attribute means for this satellite type.
- *
- * For an S3 satellite, a missing `bucket` is malformed input — we cannot say
- * the bucket is unconfigured, so it counts as uncertainty. But an
- * `aws_flow_log` may legitimately target a subnet or an ENI instead of a VPC,
- * and then `vpc_id` is simply absent. Reading that as uncertainty lets one
- * compliant subnet flow log suppress the Fail for every uncovered VPC.
- */
-export type AbsentKey = "skip" | "unresolvable";
-
-/**
  * Collects the subject keys covered by satellites of `type`.
  *
  * `keyAttribute` is the satellite's pointer back at its subject —
@@ -92,23 +81,25 @@ export function correlateBy(
   type: string,
   keyAttribute: string,
   qualifies: (resource: Resource, key: string) => Qualification,
-  absentKey: AbsentKey = "unresolvable",
 ): Correlation {
   const keys = new Map<string, string[]>();
   const unresolvable: Unresolvable[] = [];
 
   for (const resource of resourcesOfType(model, type)) {
     const read = readAttribute(resource, keyAttribute);
-    if (read.kind === "absent" && absentKey === "skip") {
-      // Not a satellite of this subject kind at all.
-      continue;
-    }
     const key = read.kind === "unknown" ? undefined : asText(read);
     if (key === undefined) {
-      unresolvable.push({
-        what: `${resource.address}.${keyAttribute}`,
-        cause: read.kind === "unknown" ? "unknown" : "unreadable",
-      });
+      // Only an *unknown* correlator can still turn out to name any subject, so
+      // only it casts doubt across the board. A key that is absent, empty or
+      // not a string names nothing and never will — an `aws_flow_log` scoped to
+      // a subnet, or a malformed satellite — so it is evidence about no
+      // subject at all. Recording it as uncertainty would let one such resource
+      // convert every evidenced Fail in the input into a not-applicable, and
+      // the reason would claim a value "could not be read" that read perfectly
+      // well and is simply empty.
+      if (read.kind === "unknown") {
+        unresolvable.push({ what: `${resource.address}.${keyAttribute}`, cause: "unknown" });
+      }
       continue;
     }
     const qualification = qualifies(resource, key);

@@ -249,6 +249,9 @@ const defaultSgLockedDown: Check = {
       group,
       vpcId: asText(readAttribute(group, "vpc_id")),
       unknownVpcId: readAttribute(group, "vpc_id").kind === "unknown",
+      // vpc_id is Optional: omitting it adopts the default VPC's group, so
+      // absent is ordinary input rather than a malformed resource.
+      absentVpcId: readAttribute(group, "vpc_id").kind === "absent",
     }));
     const allResolvable =
       identified.every((entry) => entry.id !== undefined) &&
@@ -276,18 +279,29 @@ const defaultSgLockedDown: Check = {
     // evidences something: a group whose vpc_id resolves to an id no declared
     // VPC carries adopts a VPC from somewhere else and offsets nothing here.
     const declaredIds = new Set(identified.flatMap((entry) => (entry.id ? [entry.id] : [])));
-    const offsetting = adoptions.filter(
-      (entry) => entry.vpcId === undefined || declaredIds.has(entry.vpcId),
-    ).length;
+    // Count VPCs *covered*, not groups declared: two groups naming the same VPC
+    // adopt one default group between them, and counting them as two would
+    // silently absorb a second, unmanaged VPC.
+    const matched = new Set(
+      adoptions.flatMap((entry) =>
+        entry.vpcId !== undefined && declaredIds.has(entry.vpcId) ? [entry.vpcId] : [],
+      ),
+    );
+    const unmatchable = adoptions.filter((entry) => entry.vpcId === undefined).length;
+    const offsetting = matched.size + unmatchable;
 
     if (vpcs.length > offsetting) {
-      // Name the cause honestly: unknown-until-apply and simply-absent are not
-      // the same thing, and the reason must not assert the wrong one.
+      // Name the cause honestly: unknown-until-apply, simply absent, and
+      // present-but-unreadable are three different things, and the reason must
+      // not assert the wrong one — nor blame the VPCs when it was the group's
+      // pointer that did not resolve.
       const unknownSide = identified.some((entry) => entry.unknownId)
         ? "their ids are not known until apply"
         : adoptions.some((entry) => entry.unknownVpcId)
           ? `a ${DEFAULT_SG_TYPE}'s vpc_id is not known until apply`
-          : "the ids could not be read";
+          : adoptions.some((entry) => entry.absentVpcId)
+            ? `a ${DEFAULT_SG_TYPE} declares no vpc_id, so which VPC it adopts is not stated`
+            : "the ids could not be read";
       findings.push(
         notApplicable(
           `This input declares ${String(vpcs.length)} VPC(s) but only ${String(offsetting)} ` +

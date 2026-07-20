@@ -319,15 +319,25 @@ const cloudtrailAccountability: Check = {
 
       const coverage = coverageOf(model, S3_BUCKET, accessLogged, name);
       switch (coverage.kind) {
+        // The trail is named first, as LOG-02 does. Citing only the bucket's
+        // satellite makes two trails sharing one log bucket produce
+        // byte-identical verdicts, and hides that the CloudWatch half was
+        // examined and found empty.
         case "covered":
-          return pass(
-            coverage.satellites.map((address) => ({
+          return pass([
+            {
+              resourceAddress: trail.address,
+              attribute: "cloud_watch_logs_group_arn",
+              observed: read.kind === "unknown" ? "not known until apply" : null,
+              expected: EXPECTED,
+            },
+            ...coverage.satellites.map((address) => ({
               resourceAddress: address,
               attribute: "bucket",
               observed: `configures server access logging on log bucket "${name}"`,
               expected: EXPECTED,
             })),
-          );
+          ]);
         case "uncovered":
           return groupUnsettled
             ? notApplicable(
@@ -386,10 +396,10 @@ const vpcFlowLogs: Check = {
       model,
       VPC,
       // A flow log may legitimately target a subnet or an ENI, leaving vpc_id
-      // absent. That is not uncertainty about any VPC — reading it as such
-      // would let one compliant subnet flow log suppress the Fail for every
-      // uncovered VPC in the input.
-      correlateBy(model, "aws_flow_log", "vpc_id", () => ({ kind: "yes" }), "skip"),
+      // absent. correlateBy treats that as naming no VPC rather than as
+      // uncertainty, so one compliant subnet flow log cannot suppress the Fail
+      // for every uncovered VPC in the input.
+      correlateBy(model, "aws_flow_log", "vpc_id", () => ({ kind: "yes" })),
       (covered, id) => ({
         attribute: "id",
         observed: covered ? "an aws_flow_log targets this VPC" : `no aws_flow_log targets "${id}"`,

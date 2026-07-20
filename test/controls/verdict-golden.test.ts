@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { allChecks } from "../../src/controls/index.js";
 import { FIXTURES, goldenPath, renderVerdicts } from "../support/fixture-verdicts.js";
 
 /**
@@ -22,10 +23,14 @@ describe("fixture verdict goldens", () => {
     });
   }
 
-  // A golden only guards what it contains; an empty or truncated one would
-  // pass silently.
+  // A golden only guards what it contains, so what it contains is asserted
+  // rather than assumed: a check missing from both fixtures is a check whose
+  // output nothing pins.
   it("covers every registered check in at least one fixture", () => {
     const rendered = FIXTURES.map((fixture) => renderVerdicts(fixture)).join("\n");
-    expect(rendered.length).toBeGreaterThan(2000);
+    const missing = allChecks
+      .map((check) => check.checkId)
+      .filter((checkId) => !rendered.includes(checkId));
+    expect(missing).toEqual([]);
   });
 });

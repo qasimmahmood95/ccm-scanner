@@ -54,6 +54,12 @@ export const FIXTURES = [
   "non-compliant/terraform-plan.json",
 ] as const;
 
+/**
+ * One golden per fixture. The whole path is flattened rather than just its
+ * first segment, so a second fixture in the same directory gets its own file
+ * instead of silently overwriting the first's.
+ */
 export function goldenPath(fixture: string): URL {
-  return new URL(`${fixture.split("/")[0] ?? fixture}-verdicts.txt`, FIXTURE_GOLDEN_DIR);
+  const slug = fixture.replace(/\.json$/, "").replaceAll("/", "--");
+  return new URL(`${slug}-verdicts.txt`, FIXTURE_GOLDEN_DIR);
 }
