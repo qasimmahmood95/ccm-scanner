@@ -53,14 +53,29 @@ const MAX_DEPTH = 20;
  * shape of a policy-statement observation, so stopping at the top level would
  * leave the most likely container unexamined.
  */
-function redactKeys(value: unknown, sensitive: ReadonlySet<string>, depth = 0): unknown {
+function redactKeys(
+  value: unknown,
+  sensitive: ReadonlySet<string>,
+  depth = 0,
+  seen: WeakSet<object> = new WeakSet(),
+): unknown {
   if (depth >= MAX_DEPTH) {
     return value;
+  }
+  // The depth cap alone bounds recursion but not *work*: a cycle that branches
+  // revisits the same nodes exponentially. Evidence comes from JSON.parse
+  // today, which cannot produce a cycle, but the M6 snapshot adapter is
+  // another source and the cap should actually bound.
+  if (typeof value === "object" && value !== null) {
+    if (seen.has(value)) {
+      return value;
+    }
+    seen.add(value);
   }
   if (Array.isArray(value)) {
     let changed = false;
     const items = value.map((item) => {
-      const redacted = redactKeys(item, sensitive, depth + 1);
+      const redacted = redactKeys(item, sensitive, depth + 1, seen);
       changed ||= redacted !== item;
       return redacted;
     });
@@ -77,7 +92,7 @@ function redactKeys(value: unknown, sensitive: ReadonlySet<string>, depth = 0): 
       changed = true;
       continue;
     }
-    const redacted = redactKeys(entry, sensitive, depth + 1);
+    const redacted = redactKeys(entry, sensitive, depth + 1, seen);
     changed ||= redacted !== entry;
     result[key] = redacted;
   }

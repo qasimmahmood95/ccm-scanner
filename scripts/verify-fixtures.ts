@@ -107,6 +107,25 @@ check(
   version.status === 0 && version.stdout.trim().split("\n").length === 1,
   JSON.stringify(version.stdout),
 );
+// `-v` was a merge blocker last round; nothing pinned it.
+const shortVersion = run(["-v"]);
+check(
+  "-v prints the version",
+  shortVersion.status === 0 && shortVersion.stdout.trim() === version.stdout.trim(),
+  JSON.stringify(shortVersion.stdout),
+);
+
+// commander reports an unknown subcommand through the stderr we suppress, so
+// this was silent and 0 until its exit code was honoured.
+const unknownHelp = run(["help", "bogus"]);
+check(
+  "help <unknown> reports an error rather than exiting 0 in silence",
+  unknownHelp.status === 2 && unknownHelp.stderr.trim().length > 0,
+  `exit ${String(unknownHelp.status)}, stderr ${String(unknownHelp.stderr.length)}B`,
+);
+expectExit("an unknown command is a usage error", ["bogus"], 2);
+expectExit("a whitespace --out is a usage error", ["scan", "-i", COMPLIANT, "-o", "   "], 2);
+
 const scanHelp = run(["scan", "--help"]);
 check(
   "scan --help prints the scan help once, without the root help",
