@@ -549,15 +549,39 @@ describe("regressions found by the M4 review gate", () => {
   });
 
   // SF-4. Only an explicit "egress" is safe to drop; anything else means we do
-  // not know what we are looking at.
-  it("is not_applicable when a standalone rule's type is unknown", () => {
+  // not know what we are looking at. The reason is asserted too: a bare status
+  // check also passes when the rule is silently dropped and the check falls
+  // back to "no ingress rules to inspect" — which is the bug, not the fix.
+  it("is not_applicable, naming the rule, when a standalone rule's type is unknown", () => {
     const input = model(
       sgRule(
         { type: null, from_port: 22, to_port: 22, protocol: "tcp", cidr_blocks: ["0.0.0.0/0"] },
         ["type"],
       ),
     );
-    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+    const finding = run("ivs/no-open-admin-ports", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("aws_security_group_rule.r.type");
+    expect(finding?.reason).toContain("not known until apply");
+  });
+
+  it("names the rule when its type is present but unrecognised", () => {
+    const input = model(
+      sgRule({
+        type: "Ingress",
+        from_port: 22,
+        to_port: 22,
+        protocol: "tcp",
+        cidr_blocks: ["0.0.0.0/0"],
+      }),
+    );
+    const finding = run("ivs/no-open-admin-ports", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("aws_security_group_rule.r.type");
+    // Present-but-unrecognised is not unknown-until-apply, and the reason for
+    // declining must not claim it is.
+    expect(finding?.reason).toContain("could not be read");
+    expect(finding?.reason).not.toContain("not known until apply");
   });
 
   // SF-5. A VPC created here whose default group is never adopted keeps the
@@ -584,23 +608,153 @@ describe("regressions found by the M4 review gate", () => {
   });
 
   // FU-1. Defaulting a missing protocol to "-1" means *every protocol*, which
-  // manufactured an "all ports open to the world" failure out of a gap.
-  it("declines rather than fabricating a failure when the protocol is missing", () => {
+  // manufactured an "all ports open to the world" failure out of a gap. The
+  // rule must be *reported*, not merely not-failed — so the reason is asserted.
+  it("declines, naming the rule, when the protocol is missing", () => {
     const input = model(
       resource("aws_security_group.w", "aws_security_group", {
         ingress: [{ from_port: 443, to_port: 443, cidr_blocks: ["0.0.0.0/0"] }],
       }),
     );
-    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+    const finding = run("ivs/no-open-admin-ports", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("aws_security_group.w.protocol");
   });
 
-  it("declines a TCP rule whose ports are absent", () => {
+  it("declines a TCP rule whose ports are absent, naming a port attribute", () => {
     const input = model(
       resource("aws_security_group.w", "aws_security_group", {
         ingress: [{ protocol: "tcp", cidr_blocks: ["0.0.0.0/0"] }],
       }),
     );
-    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+    const finding = run("ivs/no-open-admin-ports", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    // Naming the CIDR attribute here would point an auditor at a field that
+    // was read perfectly well.
+    expect(finding?.reason).toContain("from_port");
+    expect(finding?.reason).not.toContain("cidr");
+  });
+
+  // FU-5. Ports only exist for TCP/UDP/SCTP. A protocol with no port concept
+  // is legitimately declared without ports, and an unrecognised one must not
+  // be assumed portless — that would exempt it from the check entirely.
+  it("passes a world-open ESP rule that declares no ports", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: "esp", cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("pass");
+  });
+
+  it("declines a protocol it does not classify rather than exempting it", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: "tpc", from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    const finding = run("ivs/no-open-admin-ports", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("does not classify");
+  });
+
+  it("reads a protocol given as an IANA number", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: 6, from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("fail");
+  });
+
+  it("fails a world-open rule whose protocol is the word all", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: "all", cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("fail");
+  });
+
+  // MB-A. An S3 bucket is named globally, so a satellite here can configure a
+  // bucket created in another configuration — that satellite *is* the evidence.
+  // Testing declaration before coverage reported "not declared here" while
+  // holding the very evidence that contradicts it.
+  it("passes LOG-02 when the log bucket's satellites are here but the bucket is not", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", enable_log_file_validation: true }),
+      sse(),
+      fullBlock(),
+    );
+    const finding = run("log/cloudtrail-log-validation", input)[0];
+    expect(finding?.status).toBe("pass");
+    expect(finding?.evidence.map((item) => item.resourceAddress)).toContain(
+      "aws_s3_bucket_server_side_encryption_configuration.logs",
+    );
+  });
+
+  it("passes LOG-04 when only the access-logging resource is declared", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs" }),
+      resource("aws_s3_bucket_logging.logs", "aws_s3_bucket_logging", { bucket: "logs" }),
+    );
+    expect(statusOf("log/cloudtrail-accountability", input)).toBe("pass");
+  });
+
+  // SF-C. Matching is by id, which a create plan does not know. Reporting a
+  // VPC as unevidenceable while the group beside it just passed contradicts
+  // the finding already made.
+  it("does not contradict its own Pass on a create plan", () => {
+    const input = model(
+      resource("aws_vpc.main", "aws_vpc", { id: null }, ["id"]),
+      resource(
+        "aws_default_security_group.d",
+        "aws_default_security_group",
+        { vpc_id: null, ingress: [], egress: [] },
+        ["vpc_id"],
+      ),
+    );
+    expect(statusesOf("ivs/default-sg-locked-down", input)).toEqual(["pass"]);
+  });
+
+  // Pigeonhole: more VPCs than adopted groups means at least one is unmanaged,
+  // whichever way they pair up. That much is evidenced even with unknown ids.
+  it("counts unadopted groups when ids cannot be matched", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: null }, ["id"]),
+      resource("aws_vpc.b", "aws_vpc", { id: null }, ["id"]),
+      resource(
+        "aws_default_security_group.d",
+        "aws_default_security_group",
+        { vpc_id: null, ingress: [], egress: [] },
+        ["vpc_id"],
+      ),
+    );
+    expect(statusesOf("ivs/default-sg-locked-down", input)).toEqual(["pass", "not_applicable"]);
+  });
+
+  // SF-D. "has no CloudWatch Logs group" is an assertion of absence, and an
+  // unknown ARN does not support it.
+  it("does not claim the CloudWatch group is absent when it is merely unknown", () => {
+    const input = model(
+      trail({ s3_bucket_name: "elsewhere", cloud_watch_logs_group_arn: null }, [
+        "cloud_watch_logs_group_arn",
+      ]),
+    );
+    const finding = run("log/cloudtrail-accountability", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("not known until apply");
+    expect(finding?.reason).not.toContain("has no CloudWatch Logs group");
+  });
+
+  // FU-2. A present-but-unreadable value is not an absent one, and failing on
+  // it would record `observed: null` for an input that plainly set something.
+  it("declines rather than failing on a non-string CloudWatch ARN", () => {
+    const input = model(
+      trail({ s3_bucket_name: "b", cloud_watch_logs_group_arn: 12 }),
+      bucket("b"),
+    );
+    expect(statusOf("log/cloudtrail-accountability", input)).toBe("not_applicable");
   });
 
   // FU-2. "no rules" is an assertion, and a non-list value does not support it.

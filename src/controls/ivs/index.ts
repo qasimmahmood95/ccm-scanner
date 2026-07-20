@@ -44,10 +44,15 @@ const noOpenAdminPorts: Check = {
     const findings: Finding[] = [];
 
     for (const unreadable of scan.unreadable) {
+      const why = {
+        unknown: "is not known until apply",
+        unreadable: "could not be read",
+        unrecognised: "names a protocol this scanner does not classify",
+      }[unreadable.cause];
       findings.push(
         notApplicable(
-          `${unreadable.source}.${unreadable.attribute} is not known until apply, so whether ` +
-            `it exposes a sensitive port cannot be evidenced from this input.`,
+          `${unreadable.source}.${unreadable.attribute} ${why}, so whether it exposes a ` +
+            `sensitive port cannot be evidenced from this input.`,
         ),
       );
     }
@@ -227,28 +232,42 @@ const defaultSgLockedDown: Check = {
 
     // A VPC created here whose default group is never adopted is not a silent
     // pass: AWS creates that group with allow-all-from-itself ingress and
-    // allow-all egress, and this input neither replaces nor shows them. Naming
-    // the VPC is what keeps the gap visible instead of buried.
-    const adopted = new Set(
-      groups.flatMap((group) => {
-        const vpcId = asText(readAttribute(group, "vpc_id"));
-        return vpcId === undefined ? [] : [vpcId];
-      }),
-    );
-    for (const vpc of vpcs) {
-      const id = asText(readAttribute(vpc, "id"));
-      if (id !== undefined && adopted.has(id)) {
-        continue;
+    // allow-all egress, and this input neither replaces nor shows them.
+    //
+    // Matching is by id, and a create plan knows neither side's id — so when
+    // any is unknown we fall back to counting. More VPCs than adopted groups
+    // means at least one is unmanaged whichever way they pair up, which is
+    // evidenced; naming a specific VPC there would not be. Reporting a VPC as
+    // unevidenceable while the group beside it just passed would contradict
+    // the finding we already made.
+    const identified = vpcs.map((vpc) => ({ vpc, id: asText(readAttribute(vpc, "id")) }));
+    const groupVpcIds = groups.map((group) => asText(readAttribute(group, "vpc_id")));
+    const allResolvable =
+      identified.every((entry) => entry.id !== undefined) &&
+      groupVpcIds.every((id) => id !== undefined);
+
+    if (allResolvable) {
+      const adopted = new Set(groupVpcIds);
+      for (const { vpc, id } of identified) {
+        if (id !== undefined && adopted.has(id)) {
+          continue;
+        }
+        findings.push(
+          notApplicable(
+            `${vpc.address} declares no ${DEFAULT_SG_TYPE}, so its default security group ` +
+              `keeps the rules AWS created it with — allow-all from itself, and allow-all ` +
+              `egress. Those rules are not visible here, so this is reported rather than failed.`,
+          ),
+        );
       }
+    } else if (vpcs.length > groups.length) {
       findings.push(
         notApplicable(
-          id === undefined
-            ? `${vpc.address} cannot be matched to a ${DEFAULT_SG_TYPE}: its id is not known ` +
-                `until apply, so whether its default security group is locked down cannot be ` +
-                `evidenced from this input.`
-            : `${vpc.address} declares no ${DEFAULT_SG_TYPE}, so its default security group ` +
-                `keeps the rules AWS created it with — allow-all from itself, and allow-all ` +
-                `egress. Those rules are not visible here, so this is reported rather than failed.`,
+          `This input declares ${String(vpcs.length)} VPCs but only ` +
+            `${String(groups.length)} ${DEFAULT_SG_TYPE}, so at least ` +
+            `${String(vpcs.length - groups.length)} default security group(s) keep the rules ` +
+            `AWS created them with. Which VPCs cannot be said: the ids are not known until ` +
+            `apply, so they cannot be matched to the groups that adopt them.`,
         ),
       );
     }

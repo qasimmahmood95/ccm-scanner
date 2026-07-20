@@ -32,13 +32,31 @@ const MAX_PORT = 65535;
 const ALL_PROTOCOLS = new Set(["-1", "all"]);
 
 /**
- * Protocols whose `from_port`/`to_port` are *not* TCP/UDP ports.
+ * The only protocols that actually carry ports. Terraform accepts a name or an
+ * IANA number, so both forms are listed.
+ */
+const PORT_PROTOCOLS = new Set(["tcp", "udp", "sctp", "6", "17", "132"]);
+
+/**
+ * Protocols whose `from_port`/`to_port` are not ports.
  *
  * ICMP reuses the fields for type and code, so reading `from_port: 8` as
  * "port 8" and testing it against the sensitive list would be comparing
- * unrelated numbers. Values are the names and IANA numbers Terraform accepts.
+ * unrelated numbers. The rest have no port concept at all, and Terraform makes
+ * the port fields optional for them.
  */
-const NON_PORT_PROTOCOLS = new Set(["icmp", "icmpv6", "1", "58"]);
+const PORTLESS_PROTOCOLS = new Set([
+  "icmp",
+  "icmpv6",
+  "1",
+  "58",
+  "esp",
+  "ah",
+  "gre",
+  "50",
+  "51",
+  "47",
+]);
 
 /** One ingress rule, whatever declared it. */
 export interface IngressRule {
@@ -53,10 +71,17 @@ export interface IngressRule {
   readonly cidrs: readonly string[];
 }
 
-/** An ingress rule we could not read, and why. */
+/**
+ * An ingress rule we could not judge, and why.
+ *
+ * The cause is carried for the same reason `correlate.ts` carries one: a
+ * reason that says "not known until apply" about an attribute that is merely
+ * absent, or present and malformed, misdescribes the input it is quoting.
+ */
 export interface UnreadableRule {
   readonly source: string;
   readonly attribute: string;
+  readonly cause: "unknown" | "unreadable" | "unrecognised";
 }
 
 export interface IngressScan {
@@ -110,14 +135,36 @@ function classify(
   into: { rules: IngressRule[]; unreadable: UnreadableRule[] },
 ): void {
   if (rule.protocol === undefined) {
-    into.unreadable.push({ source: rule.source, attribute: "protocol" });
+    into.unreadable.push({ source: rule.source, attribute: "protocol", cause: "unreadable" });
     return;
   }
   const settled: IngressRule = { ...rule, protocol: rule.protocol };
-  const portsMatter =
-    !ALL_PROTOCOLS.has(settled.protocol) && !NON_PORT_PROTOCOLS.has(settled.protocol);
+
+  // Recognised by allowlist, exactly as CEK-04 treats TLS policies: a protocol
+  // we have not classified must not be assumed portless, because that would
+  // silently exempt it from the whole check.
+  if (
+    !ALL_PROTOCOLS.has(settled.protocol) &&
+    !PORT_PROTOCOLS.has(settled.protocol) &&
+    !PORTLESS_PROTOCOLS.has(settled.protocol)
+  ) {
+    into.unreadable.push({
+      source: settled.source,
+      attribute: "protocol",
+      cause: "unrecognised",
+    });
+    return;
+  }
+
+  const portsMatter = PORT_PROTOCOLS.has(settled.protocol);
   if (portsMatter && (settled.fromPort === undefined || settled.toPort === undefined)) {
-    into.unreadable.push({ source: settled.source, attribute: settled.attribute });
+    // Name the ports, not the CIDR attribute this rule happens to be filed
+    // under — the CIDR was read perfectly well.
+    into.unreadable.push({
+      source: settled.source,
+      attribute: settled.fromPort === undefined ? "from_port" : "to_port",
+      cause: "unreadable",
+    });
     return;
   }
   into.rules.push(settled);
@@ -132,7 +179,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 /** Inline `ingress` blocks on `aws_security_group` / `aws_default_security_group`. */
 function inlineRules(resource: Resource, attribute: string): IngressScan {
   if (isUnknown(resource, attribute)) {
-    return { rules: [], unreadable: [{ source: resource.address, attribute }] };
+    return { rules: [], unreadable: [{ source: resource.address, attribute, cause: "unknown" }] };
   }
   const read = readAttribute(resource, attribute);
   if (read.kind !== "value") {
@@ -146,7 +193,7 @@ function inlineRules(resource: Resource, attribute: string): IngressScan {
     const fields = record(block);
     const cited = `${attribute}[${String(index)}]`;
     if (fields === undefined) {
-      unreadable.push({ source: resource.address, attribute: cited });
+      unreadable.push({ source: resource.address, attribute: cited, cause: "unreadable" });
       return;
     }
     classify(
@@ -182,7 +229,7 @@ function singleRule(
 ): IngressScan {
   for (const attribute of guarded) {
     if (isUnknown(resource, attribute)) {
-      return { rules: [], unreadable: [{ source: resource.address, attribute }] };
+      return { rules: [], unreadable: [{ source: resource.address, attribute, cause: "unknown" }] };
     }
   }
   const read = (name: string): unknown => {
@@ -255,7 +302,11 @@ export function collectIngressRules(model: ResourceModel): IngressScan {
     if (direction === "ingress") {
       absorb(standaloneRule(rule));
     } else {
-      unreadable.push({ source: rule.address, attribute: "type" });
+      unreadable.push({
+        source: rule.address,
+        attribute: "type",
+        cause: type.kind === "unknown" ? "unknown" : "unreadable",
+      });
     }
   }
   for (const rule of resourcesOfType(model, "aws_vpc_security_group_ingress_rule")) {
@@ -270,9 +321,9 @@ export function openToWorld(rule: IngressRule): boolean {
   return rule.cidrs.some((cidr) => WORLD_CIDRS.has(cidr.trim()));
 }
 
-/** True when the rule's protocol makes its port fields real TCP/UDP ports. */
+/** True when the rule's protocol makes its port fields real ports. */
 function hasPortSemantics(rule: IngressRule): boolean {
-  return !NON_PORT_PROTOCOLS.has(rule.protocol);
+  return PORT_PROTOCOLS.has(rule.protocol);
 }
 
 /** True when the rule covers every port — either explicitly or by protocol. */

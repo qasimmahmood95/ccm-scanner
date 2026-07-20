@@ -33,9 +33,18 @@ export interface Unresolvable {
   readonly subjectKey?: string;
 }
 
-/** Subject keys that satisfy some control, plus the correlators we could not resolve. */
+/**
+ * Subject keys that satisfy some control, plus the correlators we could not
+ * resolve.
+ *
+ * Each key maps to the address of the satellite that qualified it. The subject
+ * itself may be declared in a different configuration — an S3 bucket is
+ * identified by a globally unique name, so a satellite here can legitimately
+ * configure a bucket created elsewhere — and then the satellite is the only
+ * address available to cite as evidence.
+ */
 export interface Correlation {
-  readonly keys: ReadonlySet<string>;
+  readonly keys: ReadonlyMap<string, string>;
   readonly unresolvable: readonly Unresolvable[];
 }
 
@@ -83,7 +92,7 @@ export function correlateBy(
   qualifies: (resource: Resource, key: string) => Qualification,
   absentKey: AbsentKey = "unresolvable",
 ): Correlation {
-  const keys = new Set<string>();
+  const keys = new Map<string, string>();
   const unresolvable: Unresolvable[] = [];
 
   for (const resource of resourcesOfType(model, type)) {
@@ -102,7 +111,7 @@ export function correlateBy(
     }
     const qualification = qualifies(resource, key);
     if (qualification.kind === "yes") {
-      keys.add(key);
+      keys.set(key, resource.address);
     } else if (qualification.kind === "unresolvable") {
       // The subject resolved, so this uncertainty is confined to it.
       unresolvable.push({
@@ -190,11 +199,17 @@ export function coverageOf(
   const declared = resourcesOfType(model, subject.type).find(
     (resource) => asText(readAttribute(resource, subject.keyAttribute)) === key,
   );
+
+  // Coverage is decided first, and deliberately: a satellite in this input
+  // configuring a subject declared elsewhere *is* the evidence the control
+  // asks for. Testing declaration first would report "not declared here" while
+  // holding the very evidence that contradicts it.
+  const satellite = correlation.keys.get(key);
+  if (satellite !== undefined) {
+    return { kind: "covered", address: declared?.address ?? satellite };
+  }
   if (declared === undefined) {
     return { kind: "undeclared" };
-  }
-  if (correlation.keys.has(key)) {
-    return { kind: "covered", address: declared.address };
   }
   const blocking = blockingFor(correlation, key);
   if (blocking.length > 0) {

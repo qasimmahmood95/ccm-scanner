@@ -79,9 +79,9 @@ function evaluateBooleans(trail: Resource, requirements: readonly BooleanRequire
   }
   if (unknown.length > 0) {
     return notApplicable(
-      `${trail.address}.${unknown.join(", .")} is not known until apply, and every other ` +
-        `requirement of this control is satisfied, so the verdict cannot be settled from ` +
-        `this input.`,
+      `${unknown.map((attribute) => `${trail.address}.${attribute}`).join(", ")} ` +
+        `${unknown.length === 1 ? "is" : "are"} not known until apply. Nothing else read from ` +
+        `this trail is non-compliant, so the verdict cannot be settled from this input.`,
     );
   }
   return pass(evidence);
@@ -204,7 +204,7 @@ const cloudtrailLogValidation: Check = {
       qualifiesAsFullBlock(block),
     );
     const protectedBuckets: Correlation = {
-      keys: new Set([...encrypted.keys].filter((name) => blocked.keys.has(name))),
+      keys: new Map([...encrypted.keys].filter(([name]) => blocked.keys.has(name))),
       unresolvable: [...encrypted.unresolvable, ...blocked.unresolvable],
     };
 
@@ -262,16 +262,30 @@ const cloudtrailAccountability: Check = {
       // same plan — must not stop us looking at the bucket. Access logging on
       // its own is sufficient. What an unknown group does forbid is a *Fail*,
       // since the group may well be set once applied.
-      const groupUnknown = read.kind === "unknown";
+      // A value that is present but not a string is not an absent one either:
+      // failing on it would record `observed: null` for an input that plainly
+      // set something.
+      const groupUnknown = read.kind === "unknown" || read.kind === "value";
       const bucketRead = readAttribute(trail, "s3_bucket_name");
       if (bucketRead.kind === "unknown") {
         return notApplicable(unknownReason(trail, "s3_bucket_name"));
       }
+      // The two branches below describe the CloudWatch side, so they must
+      // distinguish "not set" from "not yet known" — asserting absence of a
+      // value the plan simply has not computed is the same conflation this
+      // check was fixed to remove.
+      const cloudWatch =
+        read.kind === "unknown"
+          ? "has a CloudWatch Logs group that is not known until apply"
+          : read.kind === "value"
+            ? "declares a cloud_watch_logs_group_arn that could not be read"
+            : "has no CloudWatch Logs group";
+
       const name = asText(bucketRead);
       if (name === undefined) {
         return notApplicable(
-          `${trail.address} has no CloudWatch Logs group and names no s3_bucket_name, so ` +
-            `neither accountability signal can be evidenced.`,
+          `${trail.address} ${cloudWatch} and names no s3_bucket_name, so neither ` +
+            `accountability signal can be evidenced.`,
         );
       }
 
@@ -289,9 +303,8 @@ const cloudtrailAccountability: Check = {
         case "uncovered":
           return groupUnknown
             ? notApplicable(
-                `${trail.address}.cloud_watch_logs_group_arn is not known until apply and its ` +
-                  `log bucket "${name}" has no server access logging, so neither signal can ` +
-                  `be settled from this input.`,
+                `${trail.address} ${cloudWatch} and its log bucket "${name}" has no server ` +
+                  `access logging, so neither signal can be settled from this input.`,
               )
             : fail([
                 {
@@ -309,9 +322,8 @@ const cloudtrailAccountability: Check = {
               ]);
         case "undeclared":
           return notApplicable(
-            `${trail.address} has no CloudWatch Logs group, and its log bucket "${name}" is ` +
-              `not declared in this input, so whether access to the logs is accountable ` +
-              `cannot be evidenced here.`,
+            `${trail.address} ${cloudWatch}, and its log bucket "${name}" is not declared in ` +
+              `this input, so whether access to the logs is accountable cannot be evidenced here.`,
           );
         case "unresolvable":
           return notApplicable(
