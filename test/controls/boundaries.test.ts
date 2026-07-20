@@ -87,6 +87,9 @@ describe("iam/no-wildcard-allow", () => {
       { Statement: [{ Effect: "Deny", Action: "*", Resource: "*" }] },
       "pass",
     ],
+    // Reading a lowercase Deny as an Allow would invent a failure.
+    ["lowercase deny", { Statement: [{ effect: "deny", action: "*", resource: "*" }] }, "pass"],
+    ["no Statement key at all", { Version: "2012-10-17" }, "not_applicable"],
     ["no statements", { Version: "2012-10-17", Statement: [] }, "not_applicable"],
     ["unparseable", "{not json", "not_applicable"],
   ];
@@ -171,6 +174,56 @@ describe("iam/no-wildcard-trust", () => {
       ),
     ).toBe("pass");
   });
+
+  it("fails an any-account root principal", () => {
+    expect(
+      statusOf(
+        "iam/no-wildcard-trust",
+        role({
+          Statement: [{ Effect: "Allow", Principal: { AWS: "arn:aws:iam::*:root" } }],
+        }),
+      ),
+    ).toBe("fail");
+  });
+
+  it("passes a principal tag condition, which AWS always writes with a key suffix", () => {
+    expect(
+      statusOf(
+        "iam/no-wildcard-trust",
+        role({
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: "*",
+              Condition: { StringEquals: { "aws:PrincipalTag/team": "platform" } },
+            },
+          ],
+        }),
+      ),
+    ).toBe("pass");
+  });
+
+  // Naming a constraining key is not the same as constraining. Each of these
+  // would be a Pass on the check whose whole purpose is catching roles anyone
+  // can assume.
+  const vacuous: readonly [string, Record<string, unknown>][] = [
+    ["a negated organisation match", { StringNotEquals: { "aws:PrincipalOrgID": "o-abc123" } }],
+    ["a presence test", { Null: { "aws:PrincipalOrgID": "true" } }],
+    ["a negated ARN match", { ArnNotLike: { "aws:PrincipalArn": "arn:aws:iam::1:role/admin" } }],
+    ["an any-account ARN pattern", { StringLike: { "aws:PrincipalArn": "arn:aws:iam::*:role/*" } }],
+    ["a wildcard value", { StringEquals: { "aws:PrincipalAccount": "*" } }],
+    ["an open CIDR", { IpAddress: { "aws:SourceIp": "0.0.0.0/0" } }],
+  ];
+  for (const [name, condition] of vacuous) {
+    it(`is not_applicable for a wildcard principal under ${name}`, () => {
+      expect(
+        statusOf(
+          "iam/no-wildcard-trust",
+          role({ Statement: [{ Effect: "Allow", Principal: "*", Condition: condition }] }),
+        ),
+      ).toBe("not_applicable");
+    });
+  }
 });
 
 describe("iam/mfa-enforcement-present", () => {
@@ -389,6 +442,41 @@ describe("cek/tls-enforced", () => {
 
   it("is not_applicable when the policy cannot be parsed", () => {
     expect(statusOf("cek/tls-enforced", withPolicy("{not json"))).toBe("not_applicable");
+  });
+
+  // The verdict is right in both cases, but the reason is audit evidence: a
+  // malformed policy must not be described as "not known until apply".
+  it("distinguishes an unreadable policy from one not yet known, in the reason", () => {
+    const unreadable = run("cek/tls-enforced", withPolicy("{not json"))[0]?.reason ?? "";
+    const notYetKnown = run("cek/tls-enforced", withPolicy(deny(), true))[0]?.reason ?? "";
+
+    expect(unreadable).toContain("could not be read");
+    expect(unreadable).not.toContain("not known until apply");
+    expect(notYetKnown).toContain("not known until apply");
+  });
+
+  // A correct deny in GovCloud or China must not be reported as a failure.
+  for (const partition of ["aws-us-gov", "aws-cn"]) {
+    it(`passes a deny in the ${partition} partition`, () => {
+      expect(
+        statusOf("cek/tls-enforced", withPolicy(deny({ Resource: `arn:${partition}:s3:::b/*` }))),
+      ).toBe("pass");
+    });
+  }
+
+  it("passes the canonical two-ARN form", () => {
+    expect(
+      statusOf(
+        "cek/tls-enforced",
+        withPolicy(deny({ Resource: ["arn:aws:s3:::b", "arn:aws:s3:::b/*"] })),
+      ),
+    ).toBe("pass");
+  });
+
+  it("fails a deny naming only the bucket ARN, which does not cover objects", () => {
+    expect(statusOf("cek/tls-enforced", withPolicy(deny({ Resource: "arn:aws:s3:::b" })))).toBe(
+      "fail",
+    );
   });
 
   it("fails a bucket with no policy at all", () => {

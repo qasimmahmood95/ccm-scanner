@@ -62,9 +62,17 @@ const SSE_CONFIG_TYPE = "aws_s3_bucket_server_side_encryption_configuration";
  * would fail a bucket that is in fact encrypted, so unresolvable correlators
  * are tracked and make the answer not-applicable rather than a Fail.
  */
+/** Why a correlator could not be resolved — the reason must not misdescribe it. */
+type Cause = "unknown" | "unreadable";
+
+interface Unresolvable {
+  readonly what: string;
+  readonly cause: Cause;
+}
+
 interface Correlation {
   readonly names: ReadonlySet<string>;
-  readonly unresolvable: readonly string[];
+  readonly unresolvable: readonly Unresolvable[];
 }
 
 /**
@@ -75,7 +83,17 @@ interface Correlation {
 type Qualification =
   | { readonly kind: "yes" }
   | { readonly kind: "no" }
-  | { readonly kind: "unresolvable"; readonly attribute: string };
+  | { readonly kind: "unresolvable"; readonly attribute: string; readonly cause: Cause };
+
+function describeUnresolvable(entries: readonly Unresolvable[]): string {
+  return entries
+    .map((entry) =>
+      entry.cause === "unknown"
+        ? `${entry.what} is not known until apply`
+        : `${entry.what} could not be read`,
+    )
+    .join("; ");
+}
 
 function correlateByBucket(
   model: ResourceModel,
@@ -83,20 +101,26 @@ function correlateByBucket(
   qualifies: (resource: Resource, bucketName: string) => Qualification,
 ): Correlation {
   const names = new Set<string>();
-  const unresolvable: string[] = [];
+  const unresolvable: Unresolvable[] = [];
 
   for (const resource of resourcesOfType(model, type)) {
     const read = readAttribute(resource, "bucket");
     const bucket = read.kind === "unknown" ? undefined : asText(read);
     if (bucket === undefined) {
-      unresolvable.push(`${resource.address}.bucket`);
+      unresolvable.push({
+        what: `${resource.address}.bucket`,
+        cause: read.kind === "unknown" ? "unknown" : "unreadable",
+      });
       continue;
     }
     const qualification = qualifies(resource, bucket);
     if (qualification.kind === "yes") {
       names.add(bucket);
     } else if (qualification.kind === "unresolvable") {
-      unresolvable.push(`${resource.address}.${qualification.attribute}`);
+      unresolvable.push({
+        what: `${resource.address}.${qualification.attribute}`,
+        cause: qualification.cause,
+      });
     }
   }
   return { names, unresolvable };
@@ -122,9 +146,9 @@ function bucketFindings(
     const covered = correlation.names.has(name);
     if (!covered && correlation.unresolvable.length > 0) {
       return notApplicable(
-        `${bucket.address} cannot be correlated: ${correlation.unresolvable.join(", ")} ` +
-          `${correlation.unresolvable.length === 1 ? "is" : "are"} not known until apply, so a ` +
-          `configuration targeting this bucket may exist without being visible here.`,
+        `${bucket.address} cannot be correlated: ` +
+          `${describeUnresolvable(correlation.unresolvable)}, so a configuration targeting ` +
+          `this bucket may exist without being visible here.`,
       );
     }
     const evidence: Evidence = { resourceAddress: bucket.address, ...describe(covered, name) };
@@ -234,9 +258,12 @@ export function deniesInsecureTransport(statement: PolicyStatement, bucketName: 
   }
   // A deny scoped to some other bucket, or to one prefix of this one, does not
   // enforce TLS for this bucket's objects — and claiming it does would be a
-  // Pass on an assertion we never made.
+  // Pass on an assertion we never made. Matched suffix-wise so GovCloud and
+  // China partitions (`aws-us-gov`, `aws-cn`) are not falsely failed.
   return statement.resources.some(
-    (resource) => resource === "*" || resource === `arn:aws:s3:::${bucketName}/*`,
+    (resource) =>
+      resource === "*" ||
+      (resource.startsWith("arn:aws") && resource.endsWith(`:s3:::${bucketName}/*`)),
   );
 }
 
@@ -254,14 +281,14 @@ const tlsEnforced: Check = {
       const read = readAttribute(policy, "policy");
       // An unreadable document is not evidence that the bucket is unprotected.
       if (read.kind === "unknown") {
-        return { kind: "unresolvable", attribute: "policy" };
+        return { kind: "unresolvable", attribute: "policy", cause: "unknown" };
       }
       if (read.kind === "absent") {
         return { kind: "no" };
       }
       const parsed = parsePolicyDocument(read.value);
       if (parsed.kind === "unparseable") {
-        return { kind: "unresolvable", attribute: "policy" };
+        return { kind: "unresolvable", attribute: "policy", cause: "unreadable" };
       }
       if (parsed.kind === "empty") {
         return { kind: "no" };

@@ -168,7 +168,6 @@ const PRINCIPAL_CONSTRAINING_KEYS = new Set([
   "aws:principalaccount",
   "aws:principaltag",
   "aws:principaltype",
-  "aws:principalisawsservice",
   "aws:principalservicename",
   "aws:principalservicenameslist",
   "aws:userid",
@@ -185,12 +184,48 @@ const PRINCIPAL_CONSTRAINING_KEYS = new Set([
   "aws:sourceip",
 ]);
 
+/** Operators that match everything *except* their value, so they narrow nothing. */
+const NEGATING_OPERATORS = new Set([
+  "stringnotequals",
+  "stringnotequalsignorecase",
+  "stringnotlike",
+  "arnnotequals",
+  "arnnotlike",
+  "notipaddress",
+]);
+
+/** Values that match any principal, so a condition carrying only these is vacuous. */
+function isVacuousValue(value: string): boolean {
+  return value === "" || value === "*" || value === "0.0.0.0/0" || value === "::/0"
+    ? true
+    : isWildcardPrincipal(value);
+}
+
+/**
+ * Whether a condition genuinely narrows who may act.
+ *
+ * Key membership alone is not enough — the operator and the value decide.
+ * `StringNotEquals aws:PrincipalOrgID` matches everyone *outside* the org,
+ * `Null aws:PrincipalOrgID true` requires the key to be *absent*, and
+ * `StringLike aws:PrincipalArn arn:aws:iam::*:role/*` matches any role in any
+ * account. All three name a constraining key while constraining nothing, so
+ * they must not produce a Pass on the check whose whole purpose is catching
+ * roles anyone can assume.
+ */
 export function constrainsPrincipal(statement: PolicyStatement): boolean {
-  return statement.conditions.some(
-    (condition) =>
+  return statement.conditions.some((condition) => {
+    const isPrincipalKey =
       PRINCIPAL_CONSTRAINING_KEYS.has(condition.key) ||
-      condition.key.startsWith("aws:principaltag/"),
-  );
+      condition.key.startsWith("aws:principaltag/");
+    if (!isPrincipalKey) {
+      return false;
+    }
+    // A negated match, or a presence test, says nothing about *who*.
+    if (NEGATING_OPERATORS.has(condition.operator) || condition.operator === "null") {
+      return false;
+    }
+    return condition.values.length > 0 && !condition.values.every(isVacuousValue);
+  });
 }
 
 /** True when the statement uses an inverted matcher we cannot evaluate. */
