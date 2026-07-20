@@ -1,0 +1,191 @@
+# non-compliant/terraform-plan.json
+
+NOT_APPLICABLE  CEK-01  cek/na-governance
+    title: Encryption and Key Management Policy and Procedures
+    reason: A policy-and-procedures document is a governance artifact. Declarative infrastructure carries no signal of whether one exists or is followed.
+
+NOT_APPLICABLE  CEK-03  cek/encryption-at-rest
+    title: Data Encryption
+    reason: aws_ebs_volume.data.encrypted is not known until apply, so this input cannot evidence the control either way
+
+FAIL  CEK-03  cek/encryption-at-rest
+    title: Data Encryption
+    - module.storage.aws_db_instance.main.storage_encrypted
+      observed: false
+      expected: true
+
+FAIL  CEK-03  cek/encryption-at-rest
+    title: Data Encryption
+    - module.storage.aws_s3_bucket.public.bucket
+      observed: "no aws_s3_bucket_server_side_encryption_configuration targets \"example-non-compliant-public\""
+      expected: server-side encryption configured for the bucket
+
+PASS  CEK-03  cek/encryption-at-rest
+    title: Data Encryption
+    - module.storage.aws_s3_bucket.weak_algorithm.bucket
+      observed: "covered by an aws_s3_bucket_server_side_encryption_configuration"
+      expected: server-side encryption configured for the bucket
+
+FAIL  CEK-03  cek/tls-enforced
+    title: Data Encryption
+    - module.storage.aws_s3_bucket.public.bucket
+      observed: "no aws_s3_bucket_policy denies non-TLS access to \"example-non-compliant-public\""
+      expected: a policy denying every principal when aws:SecureTransport is false
+
+FAIL  CEK-03  cek/tls-enforced
+    title: Data Encryption
+    - module.storage.aws_s3_bucket.weak_algorithm.bucket
+      observed: "no aws_s3_bucket_policy denies non-TLS access to \"example-non-compliant-weak\""
+      expected: a policy denying every principal when aws:SecureTransport is false
+
+FAIL  CEK-04  cek/approved-algorithms
+    title: Encryption Algorithm
+    - aws_lb_listener.legacy.ssl_policy
+      observed: "ELBSecurityPolicy-TLS-1-0-2015-04"
+      expected: a TLS policy permitting only TLS 1.2 or better
+
+FAIL  CEK-04  cek/approved-algorithms
+    title: Encryption Algorithm
+    - module.storage.aws_s3_bucket_server_side_encryption_configuration.weak_algorithm.rule[].apply_server_side_encryption_by_default.sse_algorithm
+      observed: ["AES128"]
+      expected: one of aws:kms, aws:kms:dsse, AES256
+
+FAIL  CEK-12  cek/kms-key-rotation
+    title: Key Rotation
+    - aws_kms_key.unrotated.enable_key_rotation
+      observed: false
+      expected: true
+
+NOT_APPLICABLE  CEK-14  cek/na-lifecycle-runtime
+    title: Key Destruction
+    reason: Key destruction is a runtime lifecycle operation. deletion_window_in_days states intent but does not evidence that a key was ever destroyed.
+
+FAIL  IAM-02  iam/account-password-policy
+    title: Strong Password Policy and Procedures
+    - aws_iam_account_password_policy.weak.minimum_password_length
+      observed: 8
+      expected: at least 14 characters
+    - aws_iam_account_password_policy.weak.require_uppercase_characters
+      observed: false
+      expected: true
+    - aws_iam_account_password_policy.weak.require_lowercase_characters
+      observed: true
+      expected: true
+    - aws_iam_account_password_policy.weak.require_numbers
+      observed: true
+      expected: true
+    - aws_iam_account_password_policy.weak.require_symbols
+      observed: false
+      expected: true
+
+NOT_APPLICABLE  IAM-03  iam/na-runtime-inventory
+    title: Identity Inventory
+    reason: A complete identity inventory requires enumerating the live account's principals. An IaC module is not authoritative for identities created outside it. Becomes checkable in the cloud-snapshot lane.
+
+FAIL  IAM-05  iam/no-wildcard-allow
+    title: Least Privilege
+    - aws_iam_policy.admin.policy
+      observed: [{"Effect":"Allow","Action":["*"],"Resource":["*"]}]
+      expected: no Allow statement pairing a wildcard action with a wildcard resource
+
+NOT_APPLICABLE  IAM-08  iam/na-process-control
+    title: User Access Review
+    reason: Periodic access review is a temporal, process control. Declarative infrastructure carries no signal of whether or when a review happened.
+
+NOT_APPLICABLE  IAM-14  iam/mfa-enforcement-present
+    title: Strong Authentication
+    reason: No policy in this input requires aws:MultiFactorAuthPresent, and per-principal MFA enrolment is account runtime state that declarative infrastructure cannot show.
+
+FAIL  IAM-15  iam/password-lifecycle
+    title: Passwords Management
+    - aws_iam_account_password_policy.weak.password_reuse_prevention
+      observed: 2
+      expected: at least 24 previous passwords remembered
+    - aws_iam_account_password_policy.weak.max_password_age
+      observed: 0
+      expected: expiry of 90 days or fewer
+
+FAIL  IAM-16  iam/no-wildcard-trust
+    title: Authorization Mechanisms
+    - aws_iam_role.public.assume_role_policy
+      observed: [{"Principal":["*"]}]
+      expected: no unconditioned Allow for a wildcard principal
+
+FAIL  IVS-03  ivs/no-open-admin-ports
+    title: Network Security
+    - aws_security_group.admin.ingress[0]
+      observed: {"protocol":"tcp","from_port":22,"to_port":22,"cidrs":["0.0.0.0/0"],"exposure":"sensitive port(s) 22 open to the world"}
+      expected: no ingress from 0.0.0.0/0 or ::/0 to ports 22, 3389, 3306, 5432, 1433, 27017, 6379
+
+FAIL  IVS-03  ivs/s3-public-access-block
+    title: Network Security
+    - module.storage.aws_db_instance.main.publicly_accessible
+      observed: true
+      expected: false
+
+FAIL  IVS-03  ivs/s3-public-access-block
+    title: Network Security
+    - module.storage.aws_s3_bucket.public.bucket
+      observed: "no aws_s3_bucket_public_access_block enables all four flags for \"example-non-compliant-public\""
+      expected: all of block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets set to true
+
+FAIL  IVS-03  ivs/s3-public-access-block
+    title: Network Security
+    - module.storage.aws_s3_bucket.weak_algorithm.bucket
+      observed: "no aws_s3_bucket_public_access_block enables all four flags for \"example-non-compliant-weak\""
+      expected: all of block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets set to true
+
+NOT_APPLICABLE  IVS-04  ivs/na-host-config
+    title: OS Hardening and Base Controls
+    reason: OS and AMI hardening lives inside the image or host. An instance declaration names an AMI but carries no signal of how that image was built or configured.
+
+FAIL  IVS-06  ivs/default-sg-locked-down
+    title: Segmentation and Segregation
+    - aws_default_security_group.default.ingress
+      observed: [{"from_port":0,"to_port":0,"protocol":"-1","self":true,"cidr_blocks":[]}]
+      expected: no rules
+    - aws_default_security_group.default.egress
+      observed: "no rules"
+      expected: no rules
+
+NOT_APPLICABLE  IVS-08  ivs/na-documentation
+    title: Network Architecture Documentation
+    reason: Network architecture documentation is a written deliverable reviewed by people. No resource attribute evidences whether it exists or is current.
+
+FAIL  LOG-02  log/cloudtrail-log-validation
+    title: Audit Logs Protection
+    - aws_cloudtrail.regional.enable_log_file_validation
+      observed: false
+      expected: true
+
+FAIL  LOG-03  log/vpc-flow-logs
+    title: Security Monitoring and Alerting
+    - aws_vpc.main.id
+      observed: "no aws_flow_log targets \"vpc-0badc0ffee1234567\""
+      expected: a VPC flow log capturing this VPC's traffic
+
+FAIL  LOG-04  log/cloudtrail-accountability
+    title: Audit Logs Access and Accountability
+    - aws_cloudtrail.regional.cloud_watch_logs_group_arn
+      observed: null
+      expected: delivery to CloudWatch Logs, or access logging on the log bucket
+    - module.storage.aws_s3_bucket.public.bucket
+      observed: "holds the logs of aws_cloudtrail.regional but has no server access logging"
+      expected: delivery to CloudWatch Logs, or access logging on the log bucket
+
+NOT_APPLICABLE  LOG-05  log/na-operational
+    title: Audit Logs Monitoring and Response
+    reason: Monitoring logs and responding to what they show is an operational activity. Declarative infrastructure can show that a log exists, never that anyone acted on it.
+
+NOT_APPLICABLE  LOG-06  log/na-host-runtime
+    title: Clock Synchronization
+    reason: NTP and clock synchronisation are configured inside the host or image, below the infrastructure graph this scanner reads.
+
+FAIL  LOG-07  log/cloudtrail-multi-region
+    title: Logging Scope
+    - aws_cloudtrail.regional.is_multi_region_trail
+      observed: false
+      expected: true
+    - aws_cloudtrail.regional.include_global_service_events
+      observed: false
+      expected: true

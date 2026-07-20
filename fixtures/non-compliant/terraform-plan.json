@@ -127,6 +127,57 @@
             "encrypted": null
           },
           "sensitive_values": {}
+        },
+        {
+          "address": "aws_cloudtrail.regional",
+          "mode": "managed",
+          "type": "aws_cloudtrail",
+          "name": "regional",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "regional-trail",
+            "s3_bucket_name": "example-non-compliant-public",
+            "is_multi_region_trail": false,
+            "include_global_service_events": false,
+            "enable_log_file_validation": false
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_default_security_group.default",
+          "mode": "managed",
+          "type": "aws_default_security_group",
+          "name": "default",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "vpc_id": "vpc-0badc0ffee1234567",
+            "ingress": [
+              {
+                "from_port": 0,
+                "to_port": 0,
+                "protocol": "-1",
+                "self": true,
+                "cidr_blocks": []
+              }
+            ],
+            "egress": []
+          },
+          "sensitive_values": { "ingress": [{}], "egress": [] }
+        },
+        {
+          "address": "aws_vpc.main",
+          "mode": "managed",
+          "type": "aws_vpc",
+          "name": "main",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "id": "vpc-0badc0ffee1234567",
+            "cidr_block": "10.0.0.0/16"
+          },
+          "sensitive_values": {}
         }
       ],
       "child_modules": [

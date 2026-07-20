@@ -122,10 +122,15 @@ ID; compliant fixtures produce zero Fails; NA controls report NA with reasons.
 **Deliverables**
 - Checks: **LOG-07**, **LOG-02**, **LOG-04**, **LOG-03** (VPC flow logs);
   **IVS-03** (open admin ports + S3 public-access-block + RDS not public),
-  **IVS-06** (default SG locked down + public/private separation).
+  **IVS-06** (default SG locked down). Subnet-level public/private separation
+  is *not* claimed: routing-table reachability is a graph property this
+  scanner does not model, and `docs/control-mapping.md` — the source of truth —
+  scopes IVS-06 to the default security group only.
 - Explicit `not_applicable` registrations with reasons: **LOG-05**, **LOG-06**,
   **IVS-04**, **IVS-08**.
-- Compliant + non-compliant fixtures per check; CI job extended.
+- Compliant + non-compliant fixtures per check. The fixture assertions run under
+  `npm test` in the existing CI job; the exit-code half of the CI expectation in
+  `CLAUDE.md` arrives with the M5 CLI.
 
 **Exit criteria:** same shape as M3 for these controls. Full curated subset now
 live end-to-end over fixtures.
