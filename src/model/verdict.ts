@@ -8,6 +8,8 @@
  * — are enforced in one place that every verdict passes through.
  */
 
+import { compareStrings } from "../util/compare.js";
+
 export type Status = "pass" | "fail" | "not_applicable";
 
 /** A single observation backing a finding. */
@@ -84,4 +86,22 @@ export function verdictOf(control: ControlRef, finding: Finding): Verdict {
   }
 
   return { ...control, status: finding.status, evidence: finding.evidence };
+}
+
+function firstAddress(verdict: Verdict): string {
+  return verdict.evidence[0]?.resourceAddress ?? "";
+}
+
+/**
+ * Total order over verdicts, so a report does not depend on the order checks
+ * happened to run in. Shared by the engine and the report builder so the two
+ * cannot disagree.
+ */
+export function compareVerdicts(a: Verdict, b: Verdict): number {
+  return (
+    compareStrings(a.ccmId, b.ccmId) ||
+    compareStrings(a.checkId, b.checkId) ||
+    compareStrings(firstAddress(a), firstAddress(b)) ||
+    compareStrings(a.status, b.status)
+  );
 }

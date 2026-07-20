@@ -125,6 +125,26 @@ describe("verdict validation", () => {
     expect(() => buildReport([verdict], fixedMetadata)).toThrow(/empty ccmTitle/);
   });
 
+  // verdictOf guards the path checks take, but a deserialised report or a
+  // future ingest lane can reach buildReport without passing through it.
+  it("rejects a not_applicable verdict carrying no reason", () => {
+    const verdict = { ...control, status: "not_applicable" as const, evidence: [] };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/carries no reason/);
+  });
+
+  it("rejects a fail verdict carrying no evidence", () => {
+    const verdict = { ...control, status: "fail" as const, evidence: [] };
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/carries no evidence/);
+  });
+
+  it("rejects a checkId the registry and schema would both reject", () => {
+    const verdict = verdictOf(
+      { ...control, checkId: "ivs/ivs-03-open-ports" },
+      fail([{ resourceAddress: "aws_sg.a", observed: true }]),
+    );
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/invalid checkId/);
+  });
+
   it("rejects an unknown status rather than silently counting it as N/A", () => {
     const verdict = {
       ...control,

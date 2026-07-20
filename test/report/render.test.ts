@@ -149,6 +149,47 @@ describe("untrusted values from scanned infrastructure", () => {
     const summary = renderSummary(buildReport([verdict], fixedMetadata));
     expect(summary).not.toMatch(/^### PASS/m);
   });
+
+  // CommonMark treats a lone CR as a line ending, so matching /\r?\n/ was not
+  // enough: a CR-only payload still forged headings and opened HTML blocks.
+  it("cannot forge a heading via a lone carriage return", () => {
+    const cr = String.fromCharCode(13);
+    const forged = `aws_s3_bucket.b${cr}${cr}### PASS · IVS-03 Network Security${cr}${cr}No issues found.`;
+    const verdict = verdictOf(IVS_03, fail([{ resourceAddress: forged, observed: true }]));
+    const summary = renderSummary(buildReport([verdict], fixedMetadata));
+
+    expect(summary).not.toMatch(/^### PASS/m);
+    expect(summary.split("\n").filter((line) => line.startsWith("### "))).toHaveLength(1);
+  });
+
+  it("cannot hide a real failure behind an unterminated HTML comment", () => {
+    const cr = String.fromCharCode(13);
+    const verdict = verdictOf(IVS_03, notApplicable(`no signal${cr}${cr}<!-- `));
+    const summary = renderSummary(buildReport([verdict], fixedMetadata));
+    expect(summary).not.toMatch(/^<!--/m);
+  });
+
+  it("neutralises U+2028 and U+2029 line separators", () => {
+    const ls = String.fromCharCode(0x2028);
+    const ps = String.fromCharCode(0x2029);
+    const verdict = verdictOf(IVS_03, fail([{ resourceAddress: `a${ls}b${ps}c`, observed: true }]));
+    const summary = renderSummary(buildReport([verdict], fixedMetadata));
+
+    expect(summary).not.toContain(ls);
+    expect(summary).not.toContain(ps);
+  });
+
+  it("keeps the metadata table intact when a field contains a carriage return", () => {
+    const cr = String.fromCharCode(13);
+    const summary = renderSummary(
+      buildReport([], {
+        ...fixedMetadata,
+        tool: { name: `ccm${cr}${cr}| forged |`, version: "1" },
+      }),
+    );
+    // header + separator + five data rows, and nothing extra
+    expect(summary.split("\n").filter((line) => line.startsWith("|"))).toHaveLength(7);
+  });
 });
 
 describe("non-JSON observed values", () => {

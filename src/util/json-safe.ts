@@ -4,12 +4,24 @@
  * Evidence `observed` values come from parsed input and are normally plain
  * JSON, but the cloud-snapshot lane surfaces SDK values such as `Date` (IAM
  * CreateDate, KMS rotation dates) and a check could hand us a BigInt, a
- * function, a non-finite number or a cyclic object. Rendering the report must
- * never throw, never silently drop a field the schema requires, and never
- * flatten a real timestamp to `{}` — so we coerce deliberately rather than trust.
+ * function, a non-finite number, a cyclic object, or something actively
+ * hostile like a throwing getter. Rendering the report must never throw and
+ * never silently drop a field the schema requires, so every step that can
+ * fail is contained.
  */
+const UNSERIALISABLE = "[unserialisable]";
+
 export function toJsonSafe(value: unknown): unknown {
   return coerce(value, new Set<object>());
+}
+
+/** `String(x)` can itself throw (null-prototype objects, hostile toPrimitive). */
+function safeString(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return UNSERIALISABLE;
+  }
 }
 
 function coerce(value: unknown, seen: Set<object>): unknown {
@@ -37,30 +49,48 @@ function coerce(value: unknown, seen: Set<object>): unknown {
   try {
     // Honour the toJSON contract first: this is what preserves Date as an ISO
     // string rather than serialising it as an empty object.
-    const toJson: unknown = (value as { toJSON?: unknown }).toJSON;
+    let toJson: unknown;
+    try {
+      toJson = (value as { toJSON?: unknown }).toJSON;
+    } catch {
+      toJson = undefined;
+    }
     if (typeof toJson === "function") {
       try {
         return coerce((toJson as (this: unknown) => unknown).call(value), seen);
       } catch {
-        return String(value);
+        return safeString(value);
       }
     }
+
     if (Array.isArray(value)) {
       return value.map((entry) => coerce(entry, seen));
     }
     if (value instanceof Map) {
       const out: Record<string, unknown> = {};
       for (const [key, entry] of value) {
-        out[String(key)] = coerce(entry, seen);
+        out[safeString(key)] = coerce(entry, seen);
       }
       return out;
     }
     if (value instanceof Set) {
       return [...value].map((entry) => coerce(entry, seen));
     }
+
     const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      out[key] = coerce(entry, seen);
+    let keys: string[];
+    try {
+      keys = Object.keys(value);
+    } catch {
+      return UNSERIALISABLE;
+    }
+    for (const key of keys) {
+      // One hostile getter must not take down the whole report.
+      try {
+        out[key] = coerce((value as Record<string, unknown>)[key], seen);
+      } catch {
+        out[key] = UNSERIALISABLE;
+      }
     }
     return out;
   } finally {

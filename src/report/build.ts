@@ -1,5 +1,6 @@
 import { CCM_DOMAINS, domainOfCcmId } from "../model/ccm.js";
-import type { Status, Verdict } from "../model/verdict.js";
+import { checkIdProblem } from "../model/check-id.js";
+import { compareVerdicts, type Status, type Verdict } from "../model/verdict.js";
 import { compareStrings } from "../util/compare.js";
 import {
   REPORT_SCHEMA_VERSION,
@@ -12,7 +13,19 @@ import {
 
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const TIMESTAMP_PATTERN =
-  /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$/;
+  /^([0-9]{4})-([0-9]{2})-([0-9]{2})T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$/;
+
+const STATUSES: readonly Status[] = ["pass", "fail", "not_applicable"];
+
+/** True when y-m-d is a real calendar date (rejects 2026-02-30, which Date rolls over). */
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
+}
 
 /**
  * The published schema is only load-bearing if we cannot emit a document that
@@ -26,8 +39,8 @@ function validateMetadata(metadata: RunMetadata): void {
     ["input.source", metadata.input.source],
   ];
   for (const [field, value] of required) {
-    if (value.trim() === "") {
-      throw new Error(`report metadata ${field} must not be empty`);
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`report metadata ${field} must be a non-empty string`);
     }
   }
   if (!DIGEST_PATTERN.test(metadata.input.digest)) {
@@ -36,50 +49,69 @@ function validateMetadata(metadata: RunMetadata): void {
         `"${metadata.input.digest}"`,
     );
   }
-  if (!TIMESTAMP_PATTERN.test(metadata.generatedAt)) {
+
+  const match = TIMESTAMP_PATTERN.exec(metadata.generatedAt);
+  if (match === null) {
     throw new Error(
       `report metadata generatedAt must be an ISO-8601 timestamp with a timezone, got ` +
         `"${metadata.generatedAt}"`,
     );
   }
-  // The pattern only checks shape; "2026-99-99T00:00:00Z" passes it.
-  if (Number.isNaN(Date.parse(metadata.generatedAt))) {
+  // The pattern only checks shape; "2026-99-99T00:00:00Z" and "2026-02-30..." pass it.
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!isRealCalendarDate(year, month, day) || Number.isNaN(Date.parse(metadata.generatedAt))) {
     throw new Error(`report metadata generatedAt is not a real date: "${metadata.generatedAt}"`);
   }
 }
 
-const STATUSES: readonly Status[] = ["pass", "fail", "not_applicable"];
-
 /**
  * Verdicts are checked here as well as at construction, because this is the
- * last gate before a document is emitted and the published schema is only
- * load-bearing if we cannot produce something that violates it.
+ * last gate before a document is emitted. `verdictOf` guards the path checks
+ * take, but a deserialised report or a future ingest lane can reach this
+ * function without passing through it, and the published schema is only
+ * meaningful if the emitter cannot produce something that violates it.
  *
  * The domain check matters most: a verdict outside the in-scope domains would
  * be counted in the totals but omitted from every per-domain section — a FAIL
- * that renders as a headline with no detail. Fail loudly instead.
+ * that renders as a headline with no detail.
  */
 function assertVerdictsAreWellFormed(verdicts: readonly Verdict[]): void {
   for (const verdict of verdicts) {
+    const where = `verdict from check "${verdict.checkId}"`;
+
     if (domainOfCcmId(verdict.ccmId) === undefined) {
       throw new Error(
-        `verdict from check "${verdict.checkId}" has ccmId "${verdict.ccmId}", which is not ` +
-          `an in-scope CCM control id (expected e.g. "IVS-03"); it would be dropped from the report`,
+        `${where} has ccmId "${verdict.ccmId}", which is not an in-scope CCM control id ` +
+          `(expected e.g. "IVS-03"); it would be dropped from the report`,
       );
     }
+
+    const idProblem = checkIdProblem(verdict.checkId);
+    if (idProblem !== undefined) {
+      throw new Error(`${where} has an invalid checkId: ${idProblem}`);
+    }
+
     if (!STATUSES.includes(verdict.status)) {
-      throw new Error(
-        `verdict from check "${verdict.checkId}" has unknown status "${String(verdict.status)}"`,
-      );
+      throw new Error(`${where} has unknown status "${String(verdict.status)}"`);
     }
-    if (verdict.ccmTitle.trim() === "") {
-      throw new Error(`verdict from check "${verdict.checkId}" has an empty ccmTitle`);
+
+    if (typeof verdict.ccmTitle !== "string" || verdict.ccmTitle.trim() === "") {
+      throw new Error(`${where} has an empty ccmTitle`);
     }
+
+    if (verdict.status === "not_applicable") {
+      if (typeof verdict.reason !== "string" || verdict.reason.trim() === "") {
+        throw new Error(`${where} is not_applicable but carries no reason`);
+      }
+    } else if (verdict.evidence.length === 0) {
+      throw new Error(`${where} is "${verdict.status}" but carries no evidence`);
+    }
+
     for (const item of verdict.evidence) {
-      if (item.resourceAddress.trim() === "") {
-        throw new Error(
-          `verdict from check "${verdict.checkId}" has evidence with an empty resourceAddress`,
-        );
+      if (typeof item.resourceAddress !== "string" || item.resourceAddress.trim() === "") {
+        throw new Error(`${where} has evidence with an empty resourceAddress`);
       }
     }
   }
@@ -147,14 +179,17 @@ function rollUpByDomain(verdicts: readonly Verdict[]): readonly DomainRollup[] {
 
 /**
  * Assembles the report. `metadata` (including the timestamp) is injected rather
- * than read from the clock, so the same input yields a byte-identical report.
+ * than read from the clock, and verdicts are re-sorted here rather than trusting
+ * the caller's order, so the same input yields a byte-identical report whatever
+ * produced the verdicts.
  */
 export function buildReport(verdicts: readonly Verdict[], metadata: RunMetadata): Report {
   validateMetadata(metadata);
   assertVerdictsAreWellFormed(verdicts);
 
-  const controls = tally(controlStatuses(verdicts));
-  const findings = tally(verdicts.map((verdict) => verdict.status));
+  const ordered = [...verdicts].sort(compareVerdicts);
+  const controls = tally(controlStatuses(ordered));
+  const findings = tally(ordered.map((verdict) => verdict.status));
   const headline: Headline = controls.fail > 0 ? "fail" : "pass";
 
   return {
@@ -163,7 +198,7 @@ export function buildReport(verdicts: readonly Verdict[], metadata: RunMetadata)
     headline,
     controls,
     findings,
-    domains: rollUpByDomain(verdicts),
-    verdicts,
+    domains: rollUpByDomain(ordered),
+    verdicts: ordered,
   };
 }

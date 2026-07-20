@@ -1,18 +1,7 @@
 import { CCM_DOMAINS, domainOfCcmId, type CcmDomain } from "../model/ccm.js";
+import { checkIdProblem } from "../model/check-id.js";
 import { compareStrings } from "../util/compare.js";
 import type { Check } from "./check.js";
-
-/** `<domain>/<slug>`, lowercase kebab slug. */
-const CHECK_ID_PATTERN = /^(iam|log|cek|ivs)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-/**
- * A CCM control number anywhere in the slug. CCM renumbers controls between
- * versions, so binding a check's identity to a control number would force
- * cascading renames on every framework bump (ADR-0003). Rejecting the domain
- * prefix alone is not enough — `cek/cek-03-encryption` embeds it just as much
- * as `cek-03/encryption` does.
- */
-const EMBEDDED_CONTROL_NUMBER = /(iam|log|cek|ivs)-[0-9]{2}/;
 
 declare const VALIDATED: unique symbol;
 
@@ -41,33 +30,26 @@ export interface ControlRegistry {
   select(selector?: CheckSelector): readonly ValidatedCheck[];
 }
 
-function validateCheck(check: Check, seen: Set<string>): void {
-  const match = CHECK_ID_PATTERN.exec(check.checkId);
-  if (match === null) {
-    const domains = CCM_DOMAINS.map((domain) => domain.toLowerCase()).join("|");
-    throw new Error(
-      `invalid checkId "${check.checkId}": expected "<domain>/<slug>" where domain is ` +
-        `one of (${domains}) and slug is kebab-case. Check IDs must not embed the CCM ` +
-        `control number (ADR-0003).`,
-    );
-  }
-
-  const slug = check.checkId.slice(check.checkId.indexOf("/") + 1);
-  if (EMBEDDED_CONTROL_NUMBER.test(slug)) {
-    throw new Error(
-      `invalid checkId "${check.checkId}": the slug must not embed the CCM control ` +
-        `number (ADR-0003); name the check for what it verifies instead.`,
-    );
+function validateCheck(
+  check: Check,
+  seenCheckIds: Set<string>,
+  titlesByControl: Map<string, string>,
+): void {
+  const idProblem = checkIdProblem(check.checkId);
+  if (idProblem !== undefined) {
+    throw new Error(`invalid checkId "${check.checkId}": ${idProblem}.`);
   }
 
   const ccmDomain = domainOfCcmId(check.ccmId);
   if (ccmDomain === undefined) {
+    const domains = CCM_DOMAINS.join(", ");
     throw new Error(
-      `invalid ccmId "${check.ccmId}" on check "${check.checkId}": expected e.g. "IVS-03".`,
+      `invalid ccmId "${check.ccmId}" on check "${check.checkId}": expected e.g. "IVS-03" ` +
+        `with a domain in (${domains}).`,
     );
   }
 
-  const checkDomain = (match[1] ?? "").toUpperCase();
+  const checkDomain = check.checkId.slice(0, check.checkId.indexOf("/")).toUpperCase();
   if (checkDomain !== ccmDomain) {
     throw new Error(
       `check "${check.checkId}" is namespaced to ${checkDomain} but its control ` +
@@ -79,10 +61,22 @@ function validateCheck(check: Check, seen: Set<string>): void {
     throw new Error(`check "${check.checkId}" is missing its verbatim CCM title.`);
   }
 
-  if (seen.has(check.checkId)) {
+  // Two checks covering one control must agree on its title, or the report
+  // would show whichever happened to sort first and hide the drift from
+  // docs/control-mapping.md.
+  const knownTitle = titlesByControl.get(check.ccmId);
+  if (knownTitle !== undefined && knownTitle !== check.ccmTitle) {
+    throw new Error(
+      `control ${check.ccmId} has conflicting titles: "${knownTitle}" and ` +
+        `"${check.ccmTitle}" (on check "${check.checkId}").`,
+    );
+  }
+  titlesByControl.set(check.ccmId, check.ccmTitle);
+
+  if (seenCheckIds.has(check.checkId)) {
     throw new Error(`duplicate checkId "${check.checkId}".`);
   }
-  seen.add(check.checkId);
+  seenCheckIds.add(check.checkId);
 }
 
 /**
@@ -90,13 +84,15 @@ function validateCheck(check: Check, seen: Set<string>): void {
  * a programming error and fail loudly rather than producing a subtly wrong report.
  */
 export function createRegistry(checks: readonly Check[]): ControlRegistry {
-  const seen = new Set<string>();
+  const seenCheckIds = new Set<string>();
+  const titlesByControl = new Map<string, string>();
   for (const check of checks) {
-    validateCheck(check, seen);
+    validateCheck(check, seenCheckIds, titlesByControl);
   }
 
   // Branding is the point of the validation above: everything downstream can
-  // now rely on these invariants holding.
+  // now rely on these invariants holding. `ValidatedCheck` adds only a phantom
+  // symbol, so a double cast is the only way to mint one.
   const ordered = [...checks].sort(
     (a, b) => compareStrings(a.ccmId, b.ccmId) || compareStrings(a.checkId, b.checkId),
   ) as unknown as readonly ValidatedCheck[];

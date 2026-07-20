@@ -1,19 +1,9 @@
 import type { ResourceModel } from "../model/resource.js";
-import { verdictOf, type Finding, type Verdict } from "../model/verdict.js";
-import { compareStrings } from "../util/compare.js";
+import { compareVerdicts, verdictOf, type Finding, type Verdict } from "../model/verdict.js";
 import type { ValidatedCheck } from "./registry.js";
 
-function firstAddress(verdict: Verdict): string {
-  return verdict.evidence[0]?.resourceAddress ?? "";
-}
-
-function compareVerdicts(a: Verdict, b: Verdict): number {
-  return (
-    compareStrings(a.ccmId, b.ccmId) ||
-    compareStrings(a.checkId, b.checkId) ||
-    compareStrings(firstAddress(a), firstAddress(b)) ||
-    compareStrings(a.status, b.status)
-  );
+function isFinding(value: unknown): value is Finding {
+  return typeof value === "object" && value !== null && "status" in value;
 }
 
 /**
@@ -24,7 +14,7 @@ function compareVerdicts(a: Verdict, b: Verdict): number {
  * Only checks that came through `createRegistry` are accepted, so the registry
  * invariants cannot be routed around. The control identity is stamped here
  * rather than trusted from the check, and anything a check does wrong surfaces
- * with the id of the check that did it.
+ * with the id of the check that did it rather than as an anonymous stack trace.
  */
 export function evaluate(
   checks: readonly ValidatedCheck[],
@@ -39,21 +29,21 @@ export function evaluate(
       checkId: check.checkId,
     };
 
-    let findings: readonly Finding[];
     try {
       const returned = check.run(model);
       if (!Array.isArray(returned)) {
         throw new TypeError(`expected an array of findings, received ${typeof returned}`);
       }
-      findings = returned;
+      for (const finding of returned) {
+        if (!isFinding(finding)) {
+          throw new TypeError(`returned a finding that is not an object with a status`);
+        }
+        verdicts.push(verdictOf(control, finding));
+      }
     } catch (cause) {
       throw new Error(`check "${check.checkId}" (${check.ccmId}) failed while evaluating`, {
         cause,
       });
-    }
-
-    for (const finding of findings) {
-      verdicts.push(verdictOf(control, finding));
     }
   }
 

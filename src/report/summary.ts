@@ -12,14 +12,22 @@ const STATUS_LABEL: Readonly<Record<Status, string>> = {
 };
 
 /**
+ * Every line ending, not just LF.
+ *
  * Resource addresses, attribute values and reasons originate from the scanned
- * infrastructure, so for Markdown purposes they are untrusted. A newline is the
- * dangerous one: it ends the current construct and lets arbitrary text become
- * new document structure — a forged "PASS" section inside a failing report.
- * Everything untrusted is flattened to a single line before it is emitted.
+ * infrastructure, so for Markdown purposes they are untrusted, and a line
+ * ending is the dangerous character: it ends the current construct and lets
+ * arbitrary text become new document structure — a forged "PASS" section inside
+ * a failing report, or an unterminated HTML comment that hides a real failure.
+ *
+ * A lone CR is a line ending in CommonMark just as much as LF is, so matching
+ * only `/\r?\n/` leaves the injection open. U+2028 and U+2029 are not CommonMark
+ * line endings but are ECMA-262 ones, and would break downstream consumers.
  */
+const LINE_ENDINGS = new RegExp("\\r\\n|[\\n\\r\\u2028\\u2029]", "g");
+
 function flatten(text: string): string {
-  return text.replace(/\r?\n/g, " ");
+  return text.replace(LINE_ENDINGS, " ");
 }
 
 /** Escapes a value for use inside a Markdown table cell. */
@@ -69,6 +77,17 @@ function groupByCheck(verdicts: readonly Verdict[]): ReadonlyMap<string, Verdict
     }
   }
   return new Map([...groups.entries()].sort(([a], [b]) => compareStrings(a, b)));
+}
+
+/** Every distinct reason in a group — a dropped reason is a dropped justification. */
+function reasonsOf(verdicts: readonly Verdict[]): readonly string[] {
+  return [
+    ...new Set(
+      verdicts.flatMap((verdict) =>
+        verdict.reason === undefined ? [] : [flatten(verdict.reason)],
+      ),
+    ),
+  ];
 }
 
 function renderEvidence(verdict: Verdict, lines: string[]): void {
@@ -126,8 +145,7 @@ function renderPassingControl(verdicts: readonly Verdict[], lines: string[]): vo
   for (const [checkId, group] of groupByCheck(verdicts)) {
     const status = statusOfControl(group);
     if (status === "not_applicable") {
-      const reason = group.find((verdict) => verdict.reason !== undefined)?.reason ?? "";
-      lines.push(`  - ${codeSpan(checkId)} — not applicable: ${flatten(reason)}`);
+      lines.push(`  - ${codeSpan(checkId)} — not applicable: ${reasonsOf(group).join("; ")}`);
     } else {
       lines.push(
         `  - ${codeSpan(checkId)} — ${plural(group.length, "finding")} (${STATUS_LABEL[status].toLowerCase()})`,

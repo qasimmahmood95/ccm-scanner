@@ -51,6 +51,18 @@ describe("createRegistry validation", () => {
   it("rejects duplicate check ids", () => {
     expect(() => createRegistry([check(), check()])).toThrow(/duplicate checkId/);
   });
+
+  // Two checks may cover one control, but they must agree on its title or the
+  // report would show whichever sorted first and hide the drift from the
+  // control-mapping table.
+  it("rejects two checks on one control disagreeing about its title", () => {
+    expect(() =>
+      createRegistry([
+        check({ checkId: "ivs/no-open-admin-ports" }),
+        check({ checkId: "ivs/no-public-exposure", ccmTitle: "Network Security (stale)" }),
+      ]),
+    ).toThrow(/conflicting titles/);
+  });
 });
 
 describe("selection", () => {
