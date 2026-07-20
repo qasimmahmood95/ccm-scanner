@@ -301,9 +301,17 @@ describe("iam/no-wildcard-trust", () => {
         },
       },
     ],
-    // ...IfExists is true when the key is absent, and a principal outside any
-    // organisation has no aws:PrincipalOrgID at all.
+    // ...IfExists is true when the key is absent, and these keys are absent for
+    // whole classes of principal — an account outside any organisation, a
+    // caller not coming via a VPC endpoint, an assumed role with no username.
     ["an IfExists org guard", { StringEqualsIfExists: { "aws:PrincipalOrgID": "o-abc123" } }],
+    ["an IfExists VPC-endpoint guard", { StringEqualsIfExists: { "aws:SourceVpce": "vpce-1" } }],
+    ["an IfExists source-IP guard", { IpAddressIfExists: { "aws:SourceIp": "203.0.113.0/24" } }],
+    ["an IfExists source-ARN guard", { ArnEqualsIfExists: { "aws:SourceArn": "arn:aws:s3:::b" } }],
+    ["an IfExists username guard", { StringEqualsIfExists: { "aws:username": "alice" } }],
+    ["an IfExists external-id guard", { StringEqualsIfExists: { "sts:ExternalId": "shared" } }],
+    // An empty value list constrains nothing.
+    ["an empty value list", { StringEquals: { "aws:PrincipalOrgID": [] } }],
   ];
   for (const [name, condition] of vacuous) {
     it(`is not_applicable for a wildcard principal under ${name}`, () => {
@@ -462,6 +470,20 @@ describe("cek/approved-algorithms", () => {
     expect(statusOf("cek/approved-algorithms", model(config))).toBe("fail");
   });
 
+  // The most common real-world setting; a regression here would false-fail
+  // most estates.
+  it("passes SSE-S3 (AES256)", () => {
+    const config = resource(
+      "aws_s3_bucket_server_side_encryption_configuration.c",
+      "aws_s3_bucket_server_side_encryption_configuration",
+      {
+        bucket: "b",
+        rule: [{ apply_server_side_encryption_by_default: [{ sse_algorithm: "AES256" }] }],
+      },
+    );
+    expect(statusOf("cek/approved-algorithms", model(config))).toBe("pass");
+  });
+
   it("passes an approved SSE algorithm", () => {
     const config = resource(
       "aws_s3_bucket_server_side_encryption_configuration.c",
@@ -574,6 +596,18 @@ describe("cek/tls-enforced", () => {
 
   it("fails a deny naming only the bucket ARN, which does not cover objects", () => {
     expect(statusOf("cek/tls-enforced", withPolicy(deny({ Resource: "arn:aws:s3:::b" })))).toBe(
+      "fail",
+    );
+  });
+
+  it("fails an ARN naming a partition that does not exist", () => {
+    expect(statusOf("cek/tls-enforced", withPolicy(deny({ Resource: "arn:awsX:s3:::b/*" })))).toBe(
+      "fail",
+    );
+  });
+
+  it("fails a deny using an inverted matcher, which cannot be evaluated", () => {
+    expect(statusOf("cek/tls-enforced", withPolicy(deny({ NotAction: ["s3:DeleteBucket"] })))).toBe(
       "fail",
     );
   });

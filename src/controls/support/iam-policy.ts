@@ -202,19 +202,24 @@ function isVacuousValue(value: string): boolean {
 }
 
 /**
- * Keys that are simply *absent* from the request context for some principals —
- * an account outside an organisation has no `aws:PrincipalOrgID`. An
- * `...IfExists` operator evaluates true when the key is absent, so pairing the
- * two admits exactly the principals the condition was meant to exclude.
+ * Keys present on *every* authenticated request, where `...IfExists` behaves
+ * exactly like its base operator.
  *
- * Keys always present on an authenticated request (`aws:PrincipalArn`,
- * `aws:userid`) are deliberately not listed: there `...IfExists` behaves like
- * its base operator, and rejecting it would invent a not-applicable.
+ * An `...IfExists` operator evaluates true when the key is absent, so pairing
+ * it with a key that some principals simply do not carry admits exactly the
+ * principals the condition meant to exclude — `StringEqualsIfExists
+ * aws:SourceVpce` on a wildcard principal lets in the whole internet.
+ *
+ * Note the polarity is the **opposite** of `PRINCIPAL_CONSTRAINING_KEYS`: a key
+ * missing from that set yields not-applicable, but a key missing from this one
+ * yields a Pass. So this set must be exhaustive, and everything else is
+ * rejected. Erring short here is the *unsafe* direction.
  */
-const OPTIONAL_PRINCIPAL_KEYS = new Set([
-  "aws:principalorgid",
-  "aws:principalorgpaths",
-  "sts:externalid",
+const ALWAYS_PRESENT_PRINCIPAL_KEYS = new Set([
+  "aws:principalarn",
+  "aws:principalaccount",
+  "aws:principaltype",
+  "aws:userid",
 ]);
 
 /**
@@ -244,7 +249,7 @@ export function constrainsPrincipal(statement: PolicyStatement): boolean {
     // no organisation at all — a guard that does not guard.
     if (
       condition.operator.endsWith("ifexists") &&
-      (OPTIONAL_PRINCIPAL_KEYS.has(condition.key) || condition.key.startsWith("aws:principaltag/"))
+      !ALWAYS_PRESENT_PRINCIPAL_KEYS.has(condition.key)
     ) {
       return false;
     }
