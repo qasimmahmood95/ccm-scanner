@@ -328,7 +328,15 @@ const cloudtrailAccountability: Check = {
             {
               resourceAddress: trail.address,
               attribute: "cloud_watch_logs_group_arn",
-              observed: read.kind === "unknown" ? "not known until apply" : null,
+              // The same three-way distinction the reason above draws: `null`
+              // asserts the attribute is unset, which is false of a value that
+              // is present but unreadable.
+              observed:
+                read.kind === "unknown"
+                  ? "not known until apply"
+                  : unreadableGroup
+                    ? "present but could not be read"
+                    : null,
               expected: EXPECTED,
             },
             ...coverage.satellites.map((address) => ({

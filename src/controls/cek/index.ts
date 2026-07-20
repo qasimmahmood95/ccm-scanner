@@ -220,6 +220,7 @@ const approvedAlgorithms: Check = {
   ccmTitle: "Encryption Algorithm",
   run: (model) => {
     const findings: Finding[] = [];
+    let plaintextListeners = 0;
 
     for (const config of resourcesOfType(model, SSE_CONFIG_TYPE)) {
       const read = readAttribute(config, "rule");
@@ -255,7 +256,10 @@ const approvedAlgorithms: Check = {
       const policy = asText(read);
       if (policy === undefined) {
         // No TLS policy means a plaintext listener: a network-exposure question
-        // (IVS), not an algorithm one.
+        // (IVS), not an algorithm one. It is still counted, so the fallback
+        // below cannot claim the input declares nothing to inspect when we
+        // deliberately declined to inspect something it declares.
+        plaintextListeners += 1;
         continue;
       }
       const evidence: Evidence[] = [
@@ -283,7 +287,12 @@ const approvedAlgorithms: Check = {
     if (findings.length === 0) {
       return [
         notApplicable(
-          "This input declares no encryption algorithm or TLS policy selections to inspect.",
+          plaintextListeners > 0
+            ? `This input declares no encryption algorithm selections to inspect. Its ` +
+                `${String(plaintextListeners)} load-balancer listener(s) select no TLS policy ` +
+                `at all, which is a network-exposure question (IVS-03) rather than an ` +
+                `algorithm one.`
+            : "This input declares no encryption algorithm or TLS policy selections to inspect.",
         ),
       ];
     }

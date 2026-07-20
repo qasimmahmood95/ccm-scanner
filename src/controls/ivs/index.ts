@@ -304,8 +304,11 @@ const defaultSgLockedDown: Check = {
             : "the ids could not be read";
       findings.push(
         notApplicable(
+          // `offsetting` counts VPCs *covered*, not groups declared — two
+          // groups adopting one VPC cover one between them — so calling it a
+          // group count would state a number the input contradicts.
           `This input declares ${String(vpcs.length)} VPC(s) but only ${String(offsetting)} ` +
-            `${DEFAULT_SG_TYPE} that could adopt one, so at least ` +
+            `of them are covered by a declared ${DEFAULT_SG_TYPE}, so at least ` +
             `${String(vpcs.length - offsetting)} default security group(s) keep the rules AWS ` +
             `created them with. Which VPCs cannot be said: ${unknownSide}, so they cannot be ` +
             `matched to the groups that adopt them.`,

@@ -1168,6 +1168,57 @@ describe("regressions found by the M4 fourth review round", () => {
   });
 });
 
+/** The three sentences the fifth round found false in otherwise-correct output. */
+describe("reasons and evidence say what is true", () => {
+  // S-1. `offsetting` counts VPCs covered, not groups declared.
+  it("counts VPCs covered, not security groups, in the IVS-06 reason", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_vpc.b", "aws_vpc", { id: null }, ["id"]),
+      resource("aws_vpc.c", "aws_vpc", { id: "vpc-c" }),
+      resource("aws_default_security_group.one", "aws_default_security_group", {
+        vpc_id: "vpc-a",
+        ingress: [],
+        egress: [],
+      }),
+      resource("aws_default_security_group.two", "aws_default_security_group", {
+        vpc_id: "vpc-a",
+        ingress: [],
+        egress: [],
+      }),
+    );
+    const finding = run("ivs/default-sg-locked-down", input).find(
+      (item) => item.status === "not_applicable",
+    );
+    expect(finding?.reason).toContain("3 VPC(s) but only 1 of them are covered");
+  });
+
+  // S-2. `observed: null` asserts the attribute is unset, which is false of a
+  // value that is present but unreadable.
+  it("does not record a present-but-unreadable ARN as null", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", cloud_watch_logs_group_arn: 42 }),
+      bucket(),
+      resource("aws_s3_bucket_logging.logs", "aws_s3_bucket_logging", { bucket: "logs" }),
+    );
+    const finding = run("log/cloudtrail-accountability", input)[0];
+    expect(finding?.status).toBe("pass");
+    const arn = finding?.evidence.find((item) => item.attribute === "cloud_watch_logs_group_arn");
+    expect(arn?.observed).toBe("present but could not be read");
+  });
+
+  // S-3. A plaintext listener is declared; declining to inspect it is not the
+  // same as the input declaring nothing.
+  it("does not claim there is nothing to inspect when a listener was skipped", () => {
+    const input = model(
+      resource("aws_lb_listener.plain", "aws_lb_listener", { port: 80, protocol: "HTTP" }),
+    );
+    const finding = run("cek/approved-algorithms", input)[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("1 load-balancer listener(s) select no TLS policy");
+  });
+});
+
 describe("every LOG and IVS check", () => {
   it("gives a reason with every not-applicable verdict", () => {
     const empty = model();
