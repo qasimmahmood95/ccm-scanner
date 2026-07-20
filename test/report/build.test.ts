@@ -160,7 +160,7 @@ describe("verdict validation", () => {
       control,
       fail([{ resourceAddress: "aws_sg.a", observed: true, attribute: 7 as unknown as string }]),
     );
-    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/attribute is not a string/);
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/attribute is not a non-empty/);
   });
 
   it("rejects evidence whose expected is not a string", () => {
@@ -168,7 +168,22 @@ describe("verdict validation", () => {
       control,
       fail([{ resourceAddress: "aws_sg.a", observed: true, expected: null as unknown as string }]),
     );
-    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/expected is not a string/);
+    expect(() => buildReport([verdict], fixedMetadata)).toThrow(/expected is not a non-empty/);
+  });
+
+  // An empty attribute would render as a present-but-blank key while an absent
+  // one is omitted, so the two must not be allowed to look alike.
+  it("rejects an empty attribute or expected, not just a missing one", () => {
+    const emptyAttribute = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, attribute: "" }]),
+    );
+    const emptyExpected = verdictOf(
+      control,
+      fail([{ resourceAddress: "aws_sg.a", observed: true, expected: "  " }]),
+    );
+    expect(() => buildReport([emptyAttribute], fixedMetadata)).toThrow(/attribute/);
+    expect(() => buildReport([emptyExpected], fixedMetadata)).toThrow(/expected/);
   });
 
   it("rejects an unknown status rather than silently counting it as N/A", () => {

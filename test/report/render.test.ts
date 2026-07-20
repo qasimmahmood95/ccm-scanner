@@ -215,6 +215,25 @@ describe("verdicts that tie on the primary sort keys", () => {
   const ordered = [ruleVerdict("ingress[0]"), ruleVerdict("ingress[1]")];
   const shuffled = [...ordered].reverse();
 
+  // An absent attribute is omitted by the JSON renderer; anything that made it
+  // compare equal to a present one would let input order leak into the bytes.
+  it("distinguishes an absent attribute from a present one", () => {
+    const withAttribute = verdictOf(
+      IVS_03,
+      fail([{ resourceAddress: "aws_security_group.web", attribute: "ingress", observed: true }]),
+    );
+    const withoutAttribute = verdictOf(
+      IVS_03,
+      fail([{ resourceAddress: "aws_security_group.web", observed: true }]),
+    );
+    const forward = [withAttribute, withoutAttribute];
+    const backward = [withoutAttribute, withAttribute];
+
+    expect(renderJson(buildReport(backward, fixedMetadata))).toBe(
+      renderJson(buildReport(forward, fixedMetadata)),
+    );
+  });
+
   it("renders byte-identically whichever order they arrive in", () => {
     expect(renderJson(buildReport(shuffled, fixedMetadata))).toBe(
       renderJson(buildReport(ordered, fixedMetadata)),

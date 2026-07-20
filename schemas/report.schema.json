@@ -112,9 +112,9 @@
       "additionalProperties": false,
       "properties": {
         "resourceAddress": { "type": "string", "minLength": 1 },
-        "attribute": { "type": "string" },
+        "attribute": { "type": "string", "minLength": 1 },
         "observed": { "description": "What was actually seen. Any JSON value." },
-        "expected": { "type": "string" }
+        "expected": { "type": "string", "minLength": 1 }
       }
     },
     "verdict": {

@@ -129,11 +129,19 @@ function assertVerdictsAreWellFormed(verdicts: readonly Verdict[]): void {
       if (typeof item.resourceAddress !== "string" || item.resourceAddress.trim() === "") {
         throw new Error(`${where} has evidence with an empty resourceAddress`);
       }
-      if (item.attribute !== undefined && typeof item.attribute !== "string") {
-        throw new Error(`${where} has evidence whose attribute is not a string`);
+      // Empty is rejected as well as absent: every other string field is
+      // required non-empty, and allowing "" here would mean two verdicts that
+      // render differently (the renderer omits an absent key and emits an
+      // empty one) could compare equal.
+      if (item.attribute !== undefined) {
+        if (typeof item.attribute !== "string" || item.attribute.trim() === "") {
+          throw new Error(`${where} has evidence whose attribute is not a non-empty string`);
+        }
       }
-      if (item.expected !== undefined && typeof item.expected !== "string") {
-        throw new Error(`${where} has evidence whose expected is not a string`);
+      if (item.expected !== undefined) {
+        if (typeof item.expected !== "string" || item.expected.trim() === "") {
+          throw new Error(`${where} has evidence whose expected is not a non-empty string`);
+        }
       }
     }
   }

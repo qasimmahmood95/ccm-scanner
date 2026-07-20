@@ -99,8 +99,12 @@ function evidenceKey(verdict: Verdict): string {
     JSON.stringify(
       verdict.evidence.map((item) => [
         item.resourceAddress,
-        item.attribute ?? "",
-        item.expected ?? "",
+        // `null` for absent, so an absent field cannot collide with an empty
+        // one — the JSON renderer omits the first and emits the second, so
+        // collapsing them here would make two differently-rendered verdicts
+        // compare equal and let input order leak into the output bytes.
+        item.attribute === undefined ? null : item.attribute,
+        item.expected === undefined ? null : item.expected,
         toJsonSafe(item.observed),
       ]),
     ) ?? ""
@@ -122,6 +126,7 @@ export function compareVerdicts(a: Verdict, b: Verdict): number {
     compareStrings(a.checkId, b.checkId) ||
     compareStrings(firstAddress(a), firstAddress(b)) ||
     compareStrings(a.status, b.status) ||
+    compareStrings(a.ccmTitle, b.ccmTitle) ||
     compareStrings(a.reason ?? "", b.reason ?? "") ||
     compareStrings(evidenceKey(a), evidenceKey(b))
   );

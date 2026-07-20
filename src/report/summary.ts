@@ -46,9 +46,17 @@ function inlineText(text: string): string {
   return flatten(text).replace(/</g, "&lt;");
 }
 
-/** Escapes a value for use inside a Markdown table cell. */
+/** Escapes untrusted text for use inside a Markdown table cell. */
 function tableCell(text: string): string {
   return inlineText(text).replace(/\|/g, "\\|");
+}
+
+/**
+ * A table cell whose content is already a code span. The fence has made it
+ * literal, so escaping `<` again would show `&lt;` to the reader.
+ */
+function fencedCell(text: string): string {
+  return flatten(text).replace(/\|/g, "\\|");
 }
 
 /** Wraps text in a fence longer than any backtick run it contains (CommonMark). */
@@ -189,8 +197,10 @@ export function renderSummary(report: Report): string {
     `| Tool | ${tableCell(`${report.metadata.tool.name} ${report.metadata.tool.version}`)} |`,
   );
   lines.push(`| CCM version | ${tableCell(report.metadata.ccmVersion)} |`);
-  lines.push(`| Input | ${tableCell(codeSpan(report.metadata.input.source))} |`);
-  lines.push(`| Input digest | ${tableCell(codeSpan(`sha256:${report.metadata.input.digest}`))} |`);
+  lines.push(`| Input | ${fencedCell(codeSpan(report.metadata.input.source))} |`);
+  lines.push(
+    `| Input digest | ${fencedCell(codeSpan(`sha256:${report.metadata.input.digest}`))} |`,
+  );
   lines.push(`| Generated | ${tableCell(report.metadata.generatedAt)} |`);
   lines.push("");
 
