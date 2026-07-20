@@ -116,6 +116,64 @@
             "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
           },
           "sensitive_values": {}
+        },
+        {
+          "address": "aws_cloudtrail.main",
+          "mode": "managed",
+          "type": "aws_cloudtrail",
+          "name": "main",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "org-trail",
+            "s3_bucket_name": "example-compliant-logs",
+            "is_multi_region_trail": true,
+            "include_global_service_events": true,
+            "enable_log_file_validation": true,
+            "cloud_watch_logs_group_arn": "arn:aws:logs:eu-west-2:123456789012:log-group:cloudtrail:*"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_default_security_group.default",
+          "mode": "managed",
+          "type": "aws_default_security_group",
+          "name": "default",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "vpc_id": "vpc-0a1b2c3d4e5f60718",
+            "ingress": [],
+            "egress": []
+          },
+          "sensitive_values": { "ingress": [], "egress": [] }
+        },
+        {
+          "address": "aws_vpc.main",
+          "mode": "managed",
+          "type": "aws_vpc",
+          "name": "main",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "id": "vpc-0a1b2c3d4e5f60718",
+            "cidr_block": "10.0.0.0/16"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_flow_log.main",
+          "mode": "managed",
+          "type": "aws_flow_log",
+          "name": "main",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "vpc_id": "vpc-0a1b2c3d4e5f60718",
+            "traffic_type": "ALL",
+            "log_destination_type": "cloud-watch-logs"
+          },
+          "sensitive_values": {}
         }
       ],
       "child_modules": [
@@ -221,6 +279,22 @@
                   "values": {
                     "bucket": "example-compliant-archive",
                     "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":\"arn:aws:s3:::example-compliant-archive/*\",\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
+                  },
+                  "sensitive_values": {}
+                },
+                {
+                  "address": "module.storage.module.replica.aws_s3_bucket_public_access_block.archive",
+                  "mode": "managed",
+                  "type": "aws_s3_bucket_public_access_block",
+                  "name": "archive",
+                  "provider_name": "registry.terraform.io/hashicorp/aws",
+                  "schema_version": 0,
+                  "values": {
+                    "bucket": "example-compliant-archive",
+                    "block_public_acls": true,
+                    "block_public_policy": true,
+                    "ignore_public_acls": true,
+                    "restrict_public_buckets": true
                   },
                   "sensitive_values": {}
                 }

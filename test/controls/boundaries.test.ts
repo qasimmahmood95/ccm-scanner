@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { allChecks } from "../../src/controls/index.js";
-import type { Finding, Resource, ResourceModel, Status } from "../../src/index.js";
+import type { Resource, ResourceModel, Status } from "../../src/index.js";
+import { model, resource, run, statusOf } from "../support/checks.js";
 
 /**
  * Unit tests at the discriminating boundary of each check.
@@ -12,40 +12,6 @@ import type { Finding, Resource, ResourceModel, Status } from "../../src/index.j
  * verdicts lived, so each is pinned here: revert any of those fixes and a test
  * fails.
  */
-
-function resource(
-  address: string,
-  type: string,
-  attributes: Record<string, unknown> = {},
-  unknownAttributes: readonly string[] = [],
-): Resource {
-  return {
-    address,
-    type,
-    name: address.split(".").pop() ?? address,
-    provider: "aws",
-    attributes,
-    unknownAttributes,
-    sensitiveAttributes: [],
-  };
-}
-
-function model(...resources: Resource[]): ResourceModel {
-  return { source: "memory:boundary-test", resources };
-}
-
-function run(checkId: string, input: ResourceModel): readonly Finding[] {
-  const check = allChecks.find((candidate) => candidate.checkId === checkId);
-  if (check === undefined) {
-    throw new Error(`no check registered as "${checkId}"`);
-  }
-  return check.run(input);
-}
-
-/** The single status a check yields for a one-resource model. */
-function statusOf(checkId: string, input: ResourceModel): Status | undefined {
-  return run(checkId, input)[0]?.status;
-}
 
 function policyResource(address: string, document: unknown, unknown = false): Resource {
   return resource(

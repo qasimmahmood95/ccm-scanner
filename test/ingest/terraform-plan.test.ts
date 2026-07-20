@@ -17,18 +17,23 @@ function addressesOf(result: typeof compliant): string[] {
 describe("ingestTerraformPlan", () => {
   it("collects managed resources from the root module and nested child modules", () => {
     expect(addressesOf(compliant)).toEqual([
+      "aws_cloudtrail.main",
+      "aws_default_security_group.default",
+      "aws_flow_log.main",
       "aws_iam_account_password_policy.strict",
       "aws_iam_policy.read_only",
       "aws_iam_policy.require_mfa",
       "aws_iam_role.app",
       "aws_kms_key.logs",
       "aws_security_group.web",
+      "aws_vpc.main",
       'module.storage.aws_s3_bucket.logs["primary"]',
       "module.storage.aws_s3_bucket_policy.logs",
       "module.storage.aws_s3_bucket_public_access_block.logs",
       "module.storage.aws_s3_bucket_server_side_encryption_configuration.logs",
       "module.storage.module.replica.aws_s3_bucket.archive",
       "module.storage.module.replica.aws_s3_bucket_policy.archive",
+      "module.storage.module.replica.aws_s3_bucket_public_access_block.archive",
       "module.storage.module.replica.aws_s3_bucket_server_side_encryption_configuration.archive",
     ]);
   });

@@ -1,5 +1,5 @@
 import type { Check } from "../../engine/check.js";
-import { resourcesOfType, type Resource, type ResourceModel } from "../../model/resource.js";
+import { resourcesOfType, type Resource } from "../../model/resource.js";
 import { fail, notApplicable, pass, type Evidence, type Finding } from "../../model/verdict.js";
 import { asText, readAttribute, unknownReason } from "../support/attributes.js";
 import {
@@ -8,6 +8,7 @@ import {
   usesInvertedMatch,
   type PolicyStatement,
 } from "../support/iam-policy.js";
+import { correlateBy, correlatedFindings, S3_BUCKET } from "../support/correlate.js";
 
 /** Resource types whose encryption-at-rest is a single boolean attribute. */
 const BOOLEAN_ENCRYPTION: readonly { readonly type: string; readonly attribute: string }[] = [
@@ -56,109 +57,6 @@ const SSE_CONFIG_TYPE = "aws_s3_bucket_server_side_encryption_configuration";
 /** AWS partitions an S3 ARN can name. */
 const S3_PARTITIONS = ["aws", "aws-cn", "aws-us-gov", "aws-iso", "aws-iso-b"] as const;
 
-/** Why a correlator could not be resolved — the reason must not misdescribe it. */
-type Cause = "unknown" | "unreadable";
-
-interface Unresolvable {
-  readonly what: string;
-  readonly cause: Cause;
-}
-
-/**
- * A correlation over bucket *names*, which is how S3's satellite resources
- * point at their bucket.
- *
- * The name is routinely `aws_s3_bucket.x.id`, which a create plan reports as
- * unknown until apply. Treating that as "no configuration targets this bucket"
- * would fail a bucket that is in fact encrypted, so unresolvable correlators
- * are tracked and make the answer not-applicable rather than a Fail.
- */
-interface Correlation {
-  readonly names: ReadonlySet<string>;
-  readonly unresolvable: readonly Unresolvable[];
-}
-
-/**
- * Whether a satellite resource satisfies the control for its bucket.
- * `unresolvable` is distinct from `no`: it means the input cannot tell us,
- * which must become not-applicable rather than a failure.
- */
-type Qualification =
-  | { readonly kind: "yes" }
-  | { readonly kind: "no" }
-  | { readonly kind: "unresolvable"; readonly attribute: string; readonly cause: Cause };
-
-function describeUnresolvable(entries: readonly Unresolvable[]): string {
-  return entries
-    .map((entry) =>
-      entry.cause === "unknown"
-        ? `${entry.what} is not known until apply`
-        : `${entry.what} could not be read`,
-    )
-    .join("; ");
-}
-
-function correlateByBucket(
-  model: ResourceModel,
-  type: string,
-  qualifies: (resource: Resource, bucketName: string) => Qualification,
-): Correlation {
-  const names = new Set<string>();
-  const unresolvable: Unresolvable[] = [];
-
-  for (const resource of resourcesOfType(model, type)) {
-    const read = readAttribute(resource, "bucket");
-    const bucket = read.kind === "unknown" ? undefined : asText(read);
-    if (bucket === undefined) {
-      unresolvable.push({
-        what: `${resource.address}.bucket`,
-        cause: read.kind === "unknown" ? "unknown" : "unreadable",
-      });
-      continue;
-    }
-    const qualification = qualifies(resource, bucket);
-    if (qualification.kind === "yes") {
-      names.add(bucket);
-    } else if (qualification.kind === "unresolvable") {
-      unresolvable.push({
-        what: `${resource.address}.${qualification.attribute}`,
-        cause: qualification.cause,
-      });
-    }
-  }
-  return { names, unresolvable };
-}
-
-/** Resolves each bucket to its name, or explains why it cannot be correlated. */
-function bucketFindings(
-  model: ResourceModel,
-  correlation: Correlation,
-  describe: (covered: boolean, name: string) => Omit<Evidence, "resourceAddress">,
-): readonly Finding[] {
-  return resourcesOfType(model, "aws_s3_bucket").map((bucket): Finding => {
-    const read = readAttribute(bucket, "bucket");
-    if (read.kind === "unknown") {
-      return notApplicable(unknownReason(bucket, "bucket"));
-    }
-    const name = asText(read);
-    if (name === undefined) {
-      return notApplicable(
-        `${bucket.address} has no resolvable bucket name, so its configuration cannot be correlated.`,
-      );
-    }
-    const covered = correlation.names.has(name);
-    if (!covered && correlation.unresolvable.length > 0) {
-      return notApplicable(
-        `${bucket.address} cannot be correlated: ` +
-          `${describeUnresolvable(correlation.unresolvable)}, so a configuration targeting ` +
-          `this bucket may exist without being visible here.`,
-      );
-    }
-    const evidence: Evidence = { resourceAddress: bucket.address, ...describe(covered, name) };
-    return covered ? pass([evidence]) : fail([evidence]);
-  });
-}
-
 /** Every `sse_algorithm` declared by an SSE configuration resource. */
 function sseAlgorithms(config: Resource): readonly string[] {
   const read = readAttribute(config, "rule");
@@ -192,9 +90,10 @@ const encryptionAtRest: Check = {
   ccmTitle: "Data Encryption",
   run: (model) => {
     const findings: Finding[] = [
-      ...bucketFindings(
+      ...correlatedFindings(
         model,
-        correlateByBucket(model, SSE_CONFIG_TYPE, () => ({ kind: "yes" })),
+        S3_BUCKET,
+        correlateBy(model, SSE_CONFIG_TYPE, "bucket", () => ({ kind: "yes" })),
         (covered, name) => ({
           attribute: "bucket",
           observed: covered
@@ -278,28 +177,33 @@ const tlsEnforced: Check = {
       return [notApplicable("This input declares no S3 buckets.")];
     }
 
-    const correlation = correlateByBucket(model, "aws_s3_bucket_policy", (policy, bucketName) => {
-      const read = readAttribute(policy, "policy");
-      // An unreadable document is not evidence that the bucket is unprotected.
-      if (read.kind === "unknown") {
-        return { kind: "unresolvable", attribute: "policy", cause: "unknown" };
-      }
-      if (read.kind === "absent") {
-        return { kind: "no" };
-      }
-      const parsed = parsePolicyDocument(read.value);
-      if (parsed.kind === "unparseable") {
-        return { kind: "unresolvable", attribute: "policy", cause: "unreadable" };
-      }
-      if (parsed.kind === "empty") {
-        return { kind: "no" };
-      }
-      return parsed.statements.some((statement) => deniesInsecureTransport(statement, bucketName))
-        ? { kind: "yes" }
-        : { kind: "no" };
-    });
+    const correlation = correlateBy(
+      model,
+      "aws_s3_bucket_policy",
+      "bucket",
+      (policy, bucketName) => {
+        const read = readAttribute(policy, "policy");
+        // An unreadable document is not evidence that the bucket is unprotected.
+        if (read.kind === "unknown") {
+          return { kind: "unresolvable", attribute: "policy", cause: "unknown" };
+        }
+        if (read.kind === "absent") {
+          return { kind: "no" };
+        }
+        const parsed = parsePolicyDocument(read.value);
+        if (parsed.kind === "unparseable") {
+          return { kind: "unresolvable", attribute: "policy", cause: "unreadable" };
+        }
+        if (parsed.kind === "empty") {
+          return { kind: "no" };
+        }
+        return parsed.statements.some((statement) => deniesInsecureTransport(statement, bucketName))
+          ? { kind: "yes" }
+          : { kind: "no" };
+      },
+    );
 
-    return bucketFindings(model, correlation, (covered, name) => ({
+    return correlatedFindings(model, S3_BUCKET, correlation, (covered, name) => ({
       attribute: "bucket",
       observed: covered
         ? "a bucket policy denies all non-TLS requests"

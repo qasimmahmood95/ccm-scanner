@@ -46,6 +46,13 @@ describe("the compliant fixture", () => {
       "IAM-14 iam/mfa-enforcement-present",
       "IAM-15 iam/password-lifecycle",
       "IAM-16 iam/no-wildcard-trust",
+      "IVS-03 ivs/no-open-admin-ports",
+      "IVS-03 ivs/s3-public-access-block",
+      "IVS-06 ivs/default-sg-locked-down",
+      "LOG-02 log/cloudtrail-log-validation",
+      "LOG-03 log/vpc-flow-logs",
+      "LOG-04 log/cloudtrail-accountability",
+      "LOG-07 log/cloudtrail-multi-region",
     ]);
   });
 
@@ -67,7 +74,59 @@ describe("the non-compliant fixture", () => {
       "IAM-05 iam/no-wildcard-allow",
       "IAM-15 iam/password-lifecycle",
       "IAM-16 iam/no-wildcard-trust",
+      "IVS-03 ivs/no-open-admin-ports",
+      "IVS-03 ivs/s3-public-access-block",
+      "IVS-06 ivs/default-sg-locked-down",
+      "LOG-02 log/cloudtrail-log-validation",
+      "LOG-03 log/vpc-flow-logs",
+      "LOG-04 log/cloudtrail-accountability",
+      "LOG-07 log/cloudtrail-multi-region",
     ]);
+  });
+
+  it("flags the world-open SSH rule against IVS-03", () => {
+    const verdict = nonCompliant.find(
+      (candidate) => candidate.status === "fail" && candidate.checkId === "ivs/no-open-admin-ports",
+    );
+    expect(verdict?.ccmId).toBe("IVS-03");
+    expect(verdict?.ccmTitle).toBe("Network Security");
+    expect(verdict?.evidence[0]?.resourceAddress).toBe("aws_security_group.admin");
+  });
+
+  it("flags the single-region trail against LOG-07, not a neighbouring LOG control", () => {
+    const verdict = nonCompliant.find(
+      (candidate) =>
+        candidate.status === "fail" && candidate.checkId === "log/cloudtrail-multi-region",
+    );
+    expect(verdict?.ccmId).toBe("LOG-07");
+    expect(verdict?.ccmTitle).toBe("Logging Scope");
+    expect(verdict?.evidence[0]?.resourceAddress).toBe("aws_cloudtrail.regional");
+  });
+
+  it("flags the VPC without a flow log against LOG-03", () => {
+    const verdict = nonCompliant.find(
+      (candidate) => candidate.status === "fail" && candidate.checkId === "log/vpc-flow-logs",
+    );
+    expect(verdict?.ccmId).toBe("LOG-03");
+    expect(verdict?.evidence[0]?.resourceAddress).toBe("aws_vpc.main");
+  });
+
+  it("flags the rule-bearing default security group against IVS-06", () => {
+    const verdict = nonCompliant.find(
+      (candidate) =>
+        candidate.status === "fail" && candidate.checkId === "ivs/default-sg-locked-down",
+    );
+    expect(verdict?.ccmId).toBe("IVS-06");
+    expect(verdict?.evidence[0]?.resourceAddress).toBe("aws_default_security_group.default");
+  });
+
+  // The default SG's rule is self-referential, not world-open, so it must not
+  // also be reported as an exposed port — each fixture defect trips one control.
+  it("does not report the default security group as an open admin port", () => {
+    const addresses = nonCompliant
+      .filter((v) => v.status === "fail" && v.checkId === "ivs/no-open-admin-ports")
+      .flatMap((v) => v.evidence.map((item) => item.resourceAddress));
+    expect(addresses).not.toContain("aws_default_security_group.default");
   });
 
   it("flags the wildcard policy against IAM-05, not some neighbouring control", () => {

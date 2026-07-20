@@ -8,7 +8,7 @@ import type { CcmDomain } from "../../src/index.js";
  */
 
 /** Domains whose checks are implemented. Extend as each milestone lands. */
-export const IMPLEMENTED_DOMAINS: readonly CcmDomain[] = ["IAM", "CEK"];
+export const IMPLEMENTED_DOMAINS: readonly CcmDomain[] = ["IAM", "LOG", "CEK", "IVS"];
 
 export interface MappingRow {
   readonly ccmId: string;
