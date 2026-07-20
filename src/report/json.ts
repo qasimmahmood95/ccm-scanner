@@ -71,6 +71,7 @@ export function toJsonObject(report: Report): Record<string, unknown> {
     controls: serialiseCounts(report.controls),
     findings: serialiseCounts(report.findings),
     domains: report.domains.map(serialiseDomain),
+    warnings: [...report.warnings],
     verdicts: report.verdicts.map(serialiseVerdict),
   };
 }

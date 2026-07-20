@@ -262,3 +262,27 @@ describe("non-JSON observed values", () => {
     );
   });
 });
+
+describe("input warnings in the summary", () => {
+  // A scan that silently dropped part of its input otherwise produces a
+  // clean-looking report over something it never read.
+  it("lists them, above the results", () => {
+    const md = renderSummary(buildStubReport(["dropped module.a", "ambiguous <shape>"]));
+    expect(md).toContain("## Input warnings");
+    expect(md).toContain("- dropped module.a");
+    expect(md.indexOf("## Input warnings")).toBeLessThan(md.indexOf("## Coverage by domain"));
+  });
+
+  // Warnings quote resource addresses and raw input, so they are untrusted.
+  it("escapes warning text rather than letting it forge structure", () => {
+    const md = renderSummary(buildStubReport(["ambiguous <shape>", "line\nbreak"]));
+    expect(md).toContain("&lt;shape>");
+    expect(md).not.toContain("<shape>");
+    // A newline would end the list item and let the rest render as Markdown.
+    expect(md).toContain("- line break");
+  });
+
+  it("omits the section entirely when there are none", () => {
+    expect(renderSummary(buildStubReport())).not.toContain("## Input warnings");
+  });
+});

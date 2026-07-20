@@ -1,4 +1,8 @@
 #!/usr/bin/env node
-import { formatBanner, readManifest } from "./banner.js";
+/**
+ * The executable shim. Unconditional by design — see the note in `main.ts`
+ * about why guarding on `process.argv[1]` breaks an npm-installed binary.
+ */
+import { runCli } from "./main.js";
 
-process.stdout.write(formatBanner(readManifest(), process.argv.slice(2)));
+process.exitCode = runCli(process.argv.slice(2));

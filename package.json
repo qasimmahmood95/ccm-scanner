@@ -16,7 +16,7 @@
     "audit"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "bin": {
     "ccm-scanner": "./dist/cli/index.js"
@@ -40,6 +40,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify:fixtures": "npm run build && tsx scripts/verify-fixtures.ts",
     "goldens:update": "tsx scripts/update-goldens.ts",
     "scan": "tsx src/cli/index.ts",
     "prepare": "husky"
@@ -58,5 +59,8 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.19.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
   }
 }

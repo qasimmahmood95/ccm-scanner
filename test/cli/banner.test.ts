@@ -4,18 +4,17 @@ import { formatBanner, readManifest, type Manifest } from "../../src/cli/banner.
 const manifest: Manifest = { name: "ccm-scanner", version: "9.9.9" };
 
 describe("formatBanner", () => {
-  it("prints only the version line for --version", () => {
-    expect(formatBanner(manifest, ["--version"])).toBe("ccm-scanner 9.9.9\n");
+  it("names the tool and its version", () => {
+    expect(formatBanner(manifest)).toContain("ccm-scanner 9.9.9");
   });
 
-  it("prints only the version line for -v", () => {
-    expect(formatBanner(manifest, ["-v"])).toBe("ccm-scanner 9.9.9\n");
-  });
-
-  it("prints the scaffold banner when no flags are given", () => {
-    const out = formatBanner(manifest, []);
-    expect(out).toContain("ccm-scanner 9.9.9");
-    expect(out).toContain("scaffold");
+  // The bare-invocation text is the first thing a new user sees, and through
+  // M4 it still said the scan command had not shipped yet.
+  it("points at the scan command rather than describing a scaffold", () => {
+    const out = formatBanner(manifest);
+    expect(out).toContain("scan --help");
+    expect(out).not.toContain("scaffold");
+    expect(out).not.toContain("M5");
   });
 });
 

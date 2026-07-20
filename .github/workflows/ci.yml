@@ -30,6 +30,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # The binary a user runs, over the committed fixtures, asserting exit
+      # codes and that each non-compliant fixture trips its expected control
+      # ids. Fixture-only by design — CI never touches a cloud account.
+      - run: npm run verify:fixtures
 
   gitleaks:
     name: gitleaks

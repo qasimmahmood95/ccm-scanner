@@ -18,17 +18,15 @@ export function readManifest(): Manifest {
 }
 
 /**
- * Renders the CLI banner. `--version` / `-v` prints only the version line.
- * The real `scan` command arrives in M5.
+ * What the tool prints when run with no arguments.
+ *
+ * Flag handling belongs to commander, which owns `--help` and `--version`;
+ * this is only the "you ran it bare, here is what it is" case.
  */
-export function formatBanner(manifest: Manifest, argv: readonly string[]): string {
-  const versionLine = `${manifest.name} ${manifest.version}\n`;
-  if (argv.includes("--version") || argv.includes("-v")) {
-    return versionLine;
-  }
+export function formatBanner(manifest: Manifest): string {
   return (
-    versionLine +
-    "Read-only CCM v4.0 compliance scanner (scaffold).\n" +
-    "The scan command lands in M5 — see docs/milestone-plan.md.\n"
+    `${manifest.name} ${manifest.version}\n` +
+    "Read-only CCM v4.0 compliance scanner for Terraform.\n" +
+    `Run \`${manifest.name} scan --help\` to get started.\n`
   );
 }
