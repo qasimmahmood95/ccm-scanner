@@ -3,21 +3,51 @@
  *
  * Terraform carries policy documents as embedded JSON strings, and every field
  * that can be a string can also be a list. We normalise that here so checks
- * stay readable. If a document cannot be parsed we return `undefined` rather
- * than guessing — the caller then reports Not-Applicable with a reason.
+ * stay readable.
+ *
+ * The parse result distinguishes three outcomes rather than collapsing them:
+ * a document we understood, one that is syntactically fine but declares no
+ * statements, and one we could not read. Only the last is a reason to say the
+ * control cannot be evidenced.
  */
 import { asArray, asString, isRecord } from "../../ingest/json.js";
 
+export type Effect = "Allow" | "Deny";
+
+export interface PolicyCondition {
+  /** Lowercased operator, e.g. `bool`, `boolifexists`, `stringequals`. */
+  readonly operator: string;
+  /** Lowercased condition key, e.g. `aws:securetransport`. */
+  readonly key: string;
+  /** Lowercased values. */
+  readonly values: readonly string[];
+}
+
 export interface PolicyStatement {
-  readonly effect: string;
+  readonly effect: Effect;
   readonly actions: readonly string[];
   readonly resources: readonly string[];
+  /**
+   * Inverted matchers. A statement using these grants or denies everything
+   * *except* what it lists, which no simple predicate over `actions` /
+   * `resources` can evaluate — checks must decline rather than guess.
+   */
+  readonly notActions: readonly string[];
+  readonly notResources: readonly string[];
   /** Flattened principals, e.g. `*`, `arn:aws:iam::123456789012:root`. */
   readonly principals: readonly string[];
+  readonly conditions: readonly PolicyCondition[];
   readonly hasCondition: boolean;
-  /** Condition keys, lowercased, e.g. `aws:multifactorauthpresent`. */
+  /** Condition keys, lowercased — convenience over `conditions`. */
   readonly conditionKeys: readonly string[];
 }
+
+export type PolicyParse =
+  | { readonly kind: "statements"; readonly statements: readonly PolicyStatement[] }
+  /** Valid JSON, but no statements to evaluate. */
+  | { readonly kind: "empty" }
+  /** Absent, not JSON, or not shaped like a policy document. */
+  | { readonly kind: "unparseable" };
 
 /** Accepts a string, a list of strings, or absent. */
 function toStringList(value: unknown): readonly string[] {
@@ -43,37 +73,51 @@ function collectPrincipals(value: unknown): readonly string[] {
   return Object.values(value).flatMap((entry) => toStringList(entry));
 }
 
-function collectConditionKeys(condition: unknown): readonly string[] {
+function collectConditions(condition: unknown): readonly PolicyCondition[] {
   if (!isRecord(condition)) {
     return [];
   }
-  // { "Bool": { "aws:MultiFactorAuthPresent": "true" } }
-  return Object.values(condition).flatMap((operands) =>
-    isRecord(operands) ? Object.keys(operands).map((key) => key.toLowerCase()) : [],
-  );
+  // { "Bool": { "aws:SecureTransport": "false" } }
+  return Object.entries(condition).flatMap(([operator, operands]) => {
+    if (!isRecord(operands)) {
+      return [];
+    }
+    return Object.entries(operands).map(([key, values]) => ({
+      operator: operator.toLowerCase(),
+      key: key.toLowerCase(),
+      values: toStringList(values).map((value) => value.toLowerCase()),
+    }));
+  });
+}
+
+/** Case-insensitive, because the surrounding keys are accepted case-insensitively too. */
+function normaliseEffect(value: unknown): Effect {
+  return (asString(value) ?? "Allow").toLowerCase() === "deny" ? "Deny" : "Allow";
 }
 
 function toStatement(raw: unknown): PolicyStatement | undefined {
   if (!isRecord(raw)) {
     return undefined;
   }
-  const condition = raw.Condition ?? raw.condition;
+  const conditions = collectConditions(raw.Condition ?? raw.condition);
   return {
-    effect: asString(raw.Effect ?? raw.effect) ?? "Allow",
+    effect: normaliseEffect(raw.Effect ?? raw.effect),
     actions: toStringList(raw.Action ?? raw.action),
     resources: toStringList(raw.Resource ?? raw.resource),
+    notActions: toStringList(raw.NotAction ?? raw.notAction),
+    notResources: toStringList(raw.NotResource ?? raw.notResource),
     principals: collectPrincipals(raw.Principal ?? raw.principal),
-    hasCondition: isRecord(condition) && Object.keys(condition).length > 0,
-    conditionKeys: collectConditionKeys(condition),
+    conditions,
+    hasCondition: conditions.length > 0,
+    conditionKeys: conditions.map((condition) => condition.key),
   };
 }
 
 /**
  * Parses a policy document from a Terraform attribute, which may be a JSON
- * string or an already-decoded object. Returns `undefined` when the value is
- * absent or cannot be understood.
+ * string or an already-decoded object.
  */
-export function parsePolicyDocument(value: unknown): readonly PolicyStatement[] | undefined {
+export function parsePolicyDocument(value: unknown): PolicyParse {
   let document: unknown = value;
 
   const asJsonString = asString(value);
@@ -81,17 +125,17 @@ export function parsePolicyDocument(value: unknown): readonly PolicyStatement[] 
     try {
       document = JSON.parse(asJsonString);
     } catch {
-      return undefined;
+      return { kind: "unparseable" };
     }
   }
 
   if (!isRecord(document)) {
-    return undefined;
+    return { kind: "unparseable" };
   }
 
   const rawStatements = document.Statement ?? document.statement;
   if (rawStatements === undefined) {
-    return undefined;
+    return { kind: "unparseable" };
   }
 
   const list = Array.isArray(rawStatements) ? rawStatements : [rawStatements];
@@ -100,15 +144,44 @@ export function parsePolicyDocument(value: unknown): readonly PolicyStatement[] 
     return statement === undefined ? [] : [statement];
   });
 
-  return statements.length > 0 ? statements : undefined;
-}
-
-/** True when the list contains a bare `*`. */
-export function hasWildcard(values: readonly string[]): boolean {
-  return values.includes("*");
+  return statements.length > 0 ? { kind: "statements", statements } : { kind: "empty" };
 }
 
 /** True when a principal entry grants everyone, e.g. `*` or `arn:aws:iam::*:root`. */
 export function isWildcardPrincipal(principal: string): boolean {
   return principal === "*" || principal.includes("::*:");
+}
+
+/**
+ * Condition keys that actually narrow *who* may act. Any other condition on a
+ * wildcard-principal Allow constrains something else entirely (transport,
+ * region, time) and leaves the principal wide open.
+ */
+const PRINCIPAL_CONSTRAINING_KEYS = new Set([
+  "aws:principalarn",
+  "aws:principalorgid",
+  "aws:principalorgpaths",
+  "aws:principalaccount",
+  "aws:principaltag",
+  "aws:principalistype",
+  "aws:sourcearn",
+  "aws:sourceaccount",
+  "aws:sourceowner",
+  "aws:sourcevpc",
+  "aws:sourcevpce",
+  "aws:sourceip",
+  "sts:externalid",
+]);
+
+export function constrainsPrincipal(statement: PolicyStatement): boolean {
+  return statement.conditions.some(
+    (condition) =>
+      PRINCIPAL_CONSTRAINING_KEYS.has(condition.key) ||
+      condition.key.startsWith("aws:principaltag/"),
+  );
+}
+
+/** True when the statement uses an inverted matcher we cannot evaluate. */
+export function usesInvertedMatch(statement: PolicyStatement): boolean {
+  return statement.notActions.length > 0 || statement.notResources.length > 0;
 }

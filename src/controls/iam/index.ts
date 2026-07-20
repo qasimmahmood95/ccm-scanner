@@ -2,7 +2,13 @@ import type { Check } from "../../engine/check.js";
 import { resourcesOfType, type Resource, type ResourceModel } from "../../model/resource.js";
 import { fail, notApplicable, pass, type Evidence, type Finding } from "../../model/verdict.js";
 import { asNumber, readAttribute, unknownReason } from "../support/attributes.js";
-import { isWildcardPrincipal, parsePolicyDocument } from "../support/iam-policy.js";
+import {
+  constrainsPrincipal,
+  isWildcardPrincipal,
+  parsePolicyDocument,
+  usesInvertedMatch,
+  type PolicyStatement,
+} from "../support/iam-policy.js";
 
 /** Terraform resource types that carry an inline or managed policy document. */
 const POLICY_TYPES = [
@@ -19,11 +25,42 @@ function policyBearingResources(model: ResourceModel): readonly Resource[] {
 }
 
 /**
+ * Reads a policy document attribute, mapping every non-evaluable outcome to a
+ * not-applicable finding with a reason that says which one it was.
+ */
+function withStatements(
+  resource: Resource,
+  attribute: string,
+  evaluate: (statements: readonly PolicyStatement[]) => Finding,
+): Finding {
+  const read = readAttribute(resource, attribute);
+  if (read.kind === "unknown") {
+    return notApplicable(unknownReason(resource, attribute));
+  }
+  if (read.kind === "absent") {
+    return notApplicable(`${resource.address} declares no ${attribute} to inspect.`);
+  }
+
+  const parsed = parsePolicyDocument(read.value);
+  if (parsed.kind === "unparseable") {
+    return notApplicable(
+      `The ${attribute} on ${resource.address} could not be parsed, so its contents ` +
+        `cannot be evidenced.`,
+    );
+  }
+  if (parsed.kind === "empty") {
+    return notApplicable(`The ${attribute} on ${resource.address} declares no statements.`);
+  }
+  return evaluate(parsed.statements);
+}
+
+/**
  * IAM-05 — Least Privilege.
  *
  * Fails a policy that pairs a wildcard action with a wildcard resource in a
- * single Allow. That combination is the unambiguous case; narrower
- * over-permissiveness is a judgement call we deliberately do not make.
+ * single Allow. A statement using NotAction/NotResource grants everything
+ * *except* what it lists; no predicate over `actions`/`resources` can evaluate
+ * that, so we decline rather than report a Pass we cannot support.
  */
 const noWildcardAllow: Check = {
   checkId: "iam/no-wildcard-allow",
@@ -39,57 +76,52 @@ const noWildcardAllow: Check = {
       ];
     }
 
-    return policies.map((resource): Finding => {
-      const read = readAttribute(resource, "policy");
-      if (read.kind === "unknown") {
-        return notApplicable(unknownReason(resource, "policy"));
-      }
-      if (read.kind === "absent") {
-        return notApplicable(`${resource.address} declares no policy document to inspect.`);
-      }
+    return policies.map((resource): Finding =>
+      withStatements(resource, "policy", (statements) => {
+        const allows = statements.filter((statement) => statement.effect === "Allow");
 
-      const statements = parsePolicyDocument(read.value);
-      if (statements === undefined) {
-        return notApplicable(
-          `The policy document on ${resource.address} could not be parsed, so its ` +
-            `permissions cannot be evidenced.`,
+        const inverted = allows.filter(usesInvertedMatch);
+        if (inverted.length > 0) {
+          return notApplicable(
+            `${resource.address} uses NotAction or NotResource, which grants everything ` +
+              `except what it lists. Its effective permissions cannot be evidenced by this check.`,
+          );
+        }
+
+        const offending = allows.filter(
+          (statement) => statement.actions.includes("*") && statement.resources.includes("*"),
         );
-      }
 
-      const offending = statements.filter(
-        (statement) =>
-          statement.effect === "Allow" &&
-          statement.actions.includes("*") &&
-          statement.resources.includes("*"),
-      );
+        const evidence: Evidence[] = [
+          {
+            resourceAddress: resource.address,
+            attribute: "policy",
+            observed:
+              offending.length > 0
+                ? offending.map((statement) => ({
+                    Effect: statement.effect,
+                    Action: statement.actions,
+                    Resource: statement.resources,
+                  }))
+                : `${String(statements.length)} statement(s), none granting *:*`,
+            expected: "no Allow statement pairing a wildcard action with a wildcard resource",
+          },
+        ];
 
-      const evidence: Evidence[] = [
-        {
-          resourceAddress: resource.address,
-          attribute: "policy",
-          observed:
-            offending.length > 0
-              ? offending.map((statement) => ({
-                  Effect: statement.effect,
-                  Action: statement.actions,
-                  Resource: statement.resources,
-                }))
-              : `${String(statements.length)} statement(s), none granting *:*`,
-          expected: "no Allow statement pairing a wildcard action with a wildcard resource",
-        },
-      ];
-
-      return offending.length > 0 ? fail(evidence) : pass(evidence);
-    });
+        return offending.length > 0 ? fail(evidence) : pass(evidence);
+      }),
+    );
   },
 };
 
 /**
  * IAM-16 — Authorization Mechanisms.
  *
- * A role that anyone may assume is an authorization failure regardless of what
- * the role can then do. A wildcard principal constrained by a Condition is not
- * flagged: that is the documented cross-account pattern.
+ * A role anyone may assume is an authorization failure regardless of what the
+ * role can then do. A wildcard principal is acceptable only when a condition
+ * narrows *who* — `aws:PrincipalOrgID`, `sts:ExternalId` and friends. A
+ * condition on something else entirely (transport, region) leaves the
+ * principal wide open, so we neither pass nor fail it: we say we cannot tell.
  */
 const noWildcardTrust: Check = {
   checkId: "iam/no-wildcard-trust",
@@ -101,44 +133,45 @@ const noWildcardTrust: Check = {
       return [notApplicable("No IAM roles are declared in this input.")];
     }
 
-    return roles.map((resource): Finding => {
-      const read = readAttribute(resource, "assume_role_policy");
-      if (read.kind === "unknown") {
-        return notApplicable(unknownReason(resource, "assume_role_policy"));
-      }
-      if (read.kind === "absent") {
-        return notApplicable(`${resource.address} declares no trust policy to inspect.`);
-      }
-
-      const statements = parsePolicyDocument(read.value);
-      if (statements === undefined) {
-        return notApplicable(
-          `The trust policy on ${resource.address} could not be parsed, so who may ` +
-            `assume the role cannot be evidenced.`,
+    return roles.map((resource): Finding =>
+      withStatements(resource, "assume_role_policy", (statements) => {
+        const wildcardAllows = statements.filter(
+          (statement) =>
+            statement.effect === "Allow" && statement.principals.some(isWildcardPrincipal),
         );
-      }
 
-      const offending = statements.filter(
-        (statement) =>
-          statement.effect === "Allow" &&
-          !statement.hasCondition &&
-          statement.principals.some(isWildcardPrincipal),
-      );
+        const unconditioned = wildcardAllows.filter((statement) => !statement.hasCondition);
+        if (unconditioned.length > 0) {
+          return fail([
+            {
+              resourceAddress: resource.address,
+              attribute: "assume_role_policy",
+              observed: unconditioned.map((statement) => ({ Principal: statement.principals })),
+              expected: "no unconditioned Allow for a wildcard principal",
+            },
+          ]);
+        }
 
-      const evidence: Evidence[] = [
-        {
-          resourceAddress: resource.address,
-          attribute: "assume_role_policy",
-          observed:
-            offending.length > 0
-              ? offending.map((statement) => ({ Principal: statement.principals }))
-              : statements.map((statement) => statement.principals).flat(),
-          expected: "no unconditioned Allow for a wildcard principal",
-        },
-      ];
+        const ambiguous = wildcardAllows.filter((statement) => !constrainsPrincipal(statement));
+        if (ambiguous.length > 0) {
+          return notApplicable(
+            `${resource.address} allows a wildcard principal under conditions that do not ` +
+              `narrow who may assume the role (` +
+              `${ambiguous.flatMap((statement) => statement.conditionKeys).join(", ")}` +
+              `), so whether access is constrained cannot be evidenced.`,
+          );
+        }
 
-      return offending.length > 0 ? fail(evidence) : pass(evidence);
-    });
+        return pass([
+          {
+            resourceAddress: resource.address,
+            attribute: "assume_role_policy",
+            observed: statements.flatMap((statement) => statement.principals),
+            expected: "no unconditioned Allow for a wildcard principal",
+          },
+        ]);
+      }),
+    );
   },
 };
 
@@ -166,7 +199,6 @@ function passwordPolicyFindings(
 
 interface Threshold {
   readonly attribute: string;
-  /** True when the observed value satisfies the control. */
   readonly satisfied: (value: unknown) => boolean;
   readonly expected: string;
 }
@@ -195,6 +227,10 @@ function evaluateThresholds(policy: Resource, thresholds: readonly Threshold[]):
   return unmet.length > 0 ? fail(evidence) : pass(evidence);
 }
 
+function atLeast(minimum: number): (value: unknown) => boolean {
+  return (value) => typeof value === "number" && value >= minimum;
+}
+
 /** IAM-02 — Strong Password Policy and Procedures. Strength only; lifecycle is IAM-15. */
 const accountPasswordPolicy: Check = {
   checkId: "iam/account-password-policy",
@@ -205,7 +241,7 @@ const accountPasswordPolicy: Check = {
       evaluateThresholds(policy, [
         {
           attribute: "minimum_password_length",
-          satisfied: (value) => (asNumber({ kind: "value", value }) ?? 0) >= 14,
+          satisfied: atLeast(14),
           expected: "at least 14 characters",
         },
         {
@@ -234,7 +270,7 @@ const passwordLifecycle: Check = {
       evaluateThresholds(policy, [
         {
           attribute: "password_reuse_prevention",
-          satisfied: (value) => (asNumber({ kind: "value", value }) ?? 0) >= 24,
+          satisfied: atLeast(24),
           expected: "at least 24 previous passwords remembered",
         },
         {
@@ -249,13 +285,26 @@ const passwordLifecycle: Check = {
     ),
 };
 
+/** True when the statement actually *requires* MFA, rather than merely mentioning it. */
+function enforcesMfa(statement: PolicyStatement): boolean {
+  return statement.conditions.some((condition) => {
+    if (condition.key !== "aws:multifactorauthpresent") {
+      return false;
+    }
+    // Deny unless MFA present, or Allow only when MFA present. The inverse of
+    // either is a policy that relaxes on MFA, not one that requires it.
+    return statement.effect === "Deny"
+      ? condition.values.includes("false")
+      : condition.values.includes("true");
+  });
+}
+
 /**
  * IAM-14 — Strong Authentication. Partial coverage by design.
  *
- * Whether a principal has actually enrolled an MFA device is account runtime
- * state that no Terraform input can show. What *is* visible is a policy that
- * refuses to authorize without MFA, so we evidence that and say plainly when we
- * cannot.
+ * Whether a principal has enrolled an MFA device is account runtime state that
+ * no Terraform input shows. What is visible is a policy that refuses to
+ * authorize without MFA, so we evidence that and say plainly when we cannot.
  */
 const mfaEnforcementPresent: Check = {
   checkId: "iam/mfa-enforcement-present",
@@ -263,39 +312,51 @@ const mfaEnforcementPresent: Check = {
   ccmTitle: "Strong Authentication",
   run: (model) => {
     const enforcing: Evidence[] = [];
+    let unreadable = 0;
 
     for (const resource of policyBearingResources(model)) {
       const read = readAttribute(resource, "policy");
-      if (read.kind !== "value") {
+      if (read.kind === "unknown") {
+        unreadable += 1;
         continue;
       }
-      const statements = parsePolicyDocument(read.value);
-      if (statements === undefined) {
+      if (read.kind === "absent") {
         continue;
       }
-      const withMfaCondition = statements.filter((statement) =>
-        statement.conditionKeys.includes("aws:multifactorauthpresent"),
-      );
-      if (withMfaCondition.length > 0) {
+      const parsed = parsePolicyDocument(read.value);
+      if (parsed.kind === "unparseable") {
+        unreadable += 1;
+        continue;
+      }
+      if (parsed.kind === "empty") {
+        continue;
+      }
+      if (parsed.statements.some(enforcesMfa)) {
         enforcing.push({
           resourceAddress: resource.address,
           attribute: "policy",
-          observed: "condition on aws:MultiFactorAuthPresent",
+          observed: "requires aws:MultiFactorAuthPresent",
           expected: "privileged access conditioned on MFA",
         });
       }
     }
 
-    if (enforcing.length === 0) {
-      return [
-        notApplicable(
-          "No policy in this input conditions access on aws:MultiFactorAuthPresent, and " +
-            "per-principal MFA enrolment is account runtime state that declarative " +
-            "infrastructure cannot show.",
-        ),
-      ];
+    if (enforcing.length > 0) {
+      return [pass(enforcing)];
     }
-    return [pass(enforcing)];
+
+    // The reason must not claim more than we looked at.
+    const caveat =
+      unreadable > 0
+        ? ` ${String(unreadable)} policy document(s) could not be read, so this is not exhaustive.`
+        : "";
+    return [
+      notApplicable(
+        "No policy in this input requires aws:MultiFactorAuthPresent, and per-principal MFA " +
+          "enrolment is account runtime state that declarative infrastructure cannot show." +
+          caveat,
+      ),
+    ];
   },
 };
 

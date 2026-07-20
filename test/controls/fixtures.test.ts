@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { allChecks } from "../../src/controls/index.js";
 import { createRegistry, evaluate, ingestTerraformPlan, type Verdict } from "../../src/index.js";
+import { rowsWithCoverage } from "../support/mapping.js";
 
 /**
  * The end-to-end contract: ingest a fixture, run every registered check, and
@@ -18,51 +19,55 @@ function scan(fixture: string): readonly Verdict[] {
 const compliant = scan("compliant/terraform-plan.json");
 const nonCompliant = scan("non-compliant/terraform-plan.json");
 
-function controlsWithStatus(verdicts: readonly Verdict[], status: Verdict["status"]): string[] {
+/** Identify by (control, check) pair — de-duplicating by control hides regressions. */
+function pairsWithStatus(verdicts: readonly Verdict[], status: Verdict["status"]): string[] {
   return [
-    ...new Set(verdicts.filter((verdict) => verdict.status === status).map((v) => v.ccmId)),
+    ...new Set(
+      verdicts
+        .filter((verdict) => verdict.status === status)
+        .map((verdict) => `${verdict.ccmId} ${verdict.checkId}`),
+    ),
   ].sort();
 }
 
 describe("the compliant fixture", () => {
   it("produces no failures at all", () => {
-    const failures = compliant.filter((verdict) => verdict.status === "fail");
-    expect(
-      failures.map((verdict) => `${verdict.ccmId} ${verdict.checkId}`),
-      "compliant fixture must be clean",
-    ).toEqual([]);
+    expect(pairsWithStatus(compliant, "fail")).toEqual([]);
   });
 
   it("passes each control that is evidenceable from it", () => {
-    expect(controlsWithStatus(compliant, "pass")).toEqual([
-      "CEK-03",
-      "CEK-04",
-      "CEK-12",
-      "IAM-02",
-      "IAM-05",
-      "IAM-14",
-      "IAM-15",
-      "IAM-16",
+    expect(pairsWithStatus(compliant, "pass")).toEqual([
+      "CEK-03 cek/encryption-at-rest",
+      "CEK-03 cek/tls-enforced",
+      "CEK-04 cek/approved-algorithms",
+      "CEK-12 cek/kms-key-rotation",
+      "IAM-02 iam/account-password-policy",
+      "IAM-05 iam/no-wildcard-allow",
+      "IAM-14 iam/mfa-enforcement-present",
+      "IAM-15 iam/password-lifecycle",
+      "IAM-16 iam/no-wildcard-trust",
     ]);
   });
 
-  it("reports the process and governance controls as not applicable, with reasons", () => {
-    const notApplicable = compliant.filter((verdict) => verdict.status === "not_applicable");
-    expect(controlsWithStatus(compliant, "not_applicable")).toEqual([
-      "CEK-01",
-      "CEK-14",
-      "IAM-03",
-      "IAM-08",
-    ]);
-    for (const verdict of notApplicable) {
-      expect(verdict.reason ?? "", verdict.ccmId).not.toBe("");
+  it("gives every not-applicable verdict a reason", () => {
+    for (const verdict of compliant.filter((v) => v.status === "not_applicable")) {
+      expect(verdict.reason ?? "", verdict.checkId).not.toBe("");
     }
   });
 });
 
 describe("the non-compliant fixture", () => {
-  it("fails exactly the controls it is built to violate", () => {
-    expect(controlsWithStatus(nonCompliant, "fail")).toEqual(["CEK-03", "CEK-12", "IAM-05"]);
+  it("fails exactly the control/check pairs it is built to violate", () => {
+    expect(pairsWithStatus(nonCompliant, "fail")).toEqual([
+      "CEK-03 cek/encryption-at-rest",
+      "CEK-03 cek/tls-enforced",
+      "CEK-04 cek/approved-algorithms",
+      "CEK-12 cek/kms-key-rotation",
+      "IAM-02 iam/account-password-policy",
+      "IAM-05 iam/no-wildcard-allow",
+      "IAM-15 iam/password-lifecycle",
+      "IAM-16 iam/no-wildcard-trust",
+    ]);
   });
 
   it("flags the wildcard policy against IAM-05, not some neighbouring control", () => {
@@ -74,6 +79,14 @@ describe("the non-compliant fixture", () => {
     expect(verdict?.evidence[0]?.resourceAddress).toBe("aws_iam_policy.admin");
   });
 
+  it("flags the world-assumable role against IAM-16", () => {
+    const verdict = nonCompliant.find(
+      (candidate) => candidate.status === "fail" && candidate.checkId === "iam/no-wildcard-trust",
+    );
+    expect(verdict?.ccmId).toBe("IAM-16");
+    expect(verdict?.evidence[0]?.resourceAddress).toBe("aws_iam_role.public");
+  });
+
   it("flags the unrotated key against CEK-12", () => {
     const verdict = nonCompliant.find(
       (candidate) => candidate.status === "fail" && candidate.checkId === "cek/kms-key-rotation",
@@ -83,14 +96,60 @@ describe("the non-compliant fixture", () => {
     expect(verdict?.evidence[0]?.observed).toBe(false);
   });
 
+  it("flags the weak TLS policy against CEK-04", () => {
+    const failures = nonCompliant.filter(
+      (candidate) => candidate.status === "fail" && candidate.checkId === "cek/approved-algorithms",
+    );
+    const addresses = failures.flatMap((v) => v.evidence.map((item) => item.resourceAddress));
+    expect(addresses).toContain("aws_lb_listener.legacy");
+  });
+
   it("flags the unencrypted database against CEK-03", () => {
     const failures = nonCompliant.filter(
       (candidate) => candidate.status === "fail" && candidate.checkId === "cek/encryption-at-rest",
     );
-    const addresses = failures.flatMap((verdict) =>
-      verdict.evidence.map((item) => item.resourceAddress),
-    );
+    const addresses = failures.flatMap((v) => v.evidence.map((item) => item.resourceAddress));
     expect(addresses).toContain("module.storage.aws_db_instance.main");
+  });
+});
+
+/**
+ * ADR-0003 requires every Yes/Partial control to have both a compliant and a
+ * non-compliant fixture. Without this the suite cannot detect a check that has
+ * been stubbed out — which is exactly how a whole check can silently stop
+ * working while the report keeps claiming coverage.
+ */
+describe("fixture coverage (ADR-0003)", () => {
+  it("gives every Yes control a failing case", () => {
+    for (const row of rowsWithCoverage(["Yes"])) {
+      expect(
+        nonCompliant.some((v) => v.checkId === row.checkId && v.status === "fail"),
+        `${row.ccmId} (${row.checkId ?? "?"}) has no failing case in the non-compliant fixture`,
+      ).toBe(true);
+    }
+  });
+
+  it("gives every Yes and Partial control a passing case", () => {
+    for (const row of rowsWithCoverage(["Yes", "Partial"])) {
+      expect(
+        compliant.some((v) => v.checkId === row.checkId && v.status === "pass"),
+        `${row.ccmId} (${row.checkId ?? "?"}) has no passing case in the compliant fixture`,
+      ).toBe(true);
+    }
+  });
+
+  it("reports every NA control as not-applicable in both fixtures", () => {
+    for (const row of rowsWithCoverage(["NA"])) {
+      for (const [name, verdicts] of [
+        ["compliant", compliant],
+        ["non-compliant", nonCompliant],
+      ] as const) {
+        expect(
+          verdicts.some((v) => v.checkId === row.checkId && v.status === "not_applicable"),
+          `${row.ccmId} should be not-applicable in the ${name} fixture`,
+        ).toBe(true);
+      }
+    }
   });
 });
 
@@ -106,7 +165,6 @@ describe("values not known until apply", () => {
 
     expect(verdict, "the EBS volume's encrypted flag is unknown until apply").toBeDefined();
     expect(verdict?.reason).toContain("not known until apply");
-    // It must not have been read as "absent" and failed.
     expect(
       nonCompliant.some(
         (candidate) =>

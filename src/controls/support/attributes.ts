@@ -32,10 +32,6 @@ export function unknownReason(resource: Resource, attribute: string): string {
   );
 }
 
-export function asBoolean(read: AttributeRead): boolean | undefined {
-  return read.kind === "value" && typeof read.value === "boolean" ? read.value : undefined;
-}
-
 export function asNumber(read: AttributeRead): number | undefined {
   return read.kind === "value" && typeof read.value === "number" ? read.value : undefined;
 }
