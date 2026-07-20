@@ -291,11 +291,21 @@ function enforcesMfa(statement: PolicyStatement): boolean {
     if (condition.key !== "aws:multifactorauthpresent") {
       return false;
     }
-    // Deny unless MFA present, or Allow only when MFA present. The inverse of
-    // either is a policy that relaxes on MFA, not one that requires it.
-    return statement.effect === "Deny"
-      ? condition.values.includes("false")
-      : condition.values.includes("true");
+    // The operator decides what the value means. `Bool:false` and `Null:true`
+    // both describe "MFA absent" — denying either enforces MFA, allowing
+    // either grants precisely when MFA is missing.
+    if (condition.operator === "bool" || condition.operator === "boolifexists") {
+      return statement.effect === "Deny"
+        ? condition.values.includes("false")
+        : condition.values.includes("true");
+    }
+    if (condition.operator === "null") {
+      return statement.effect === "Deny"
+        ? condition.values.includes("true")
+        : condition.values.includes("false");
+    }
+    // Any other operator does not evidence enforcement either way.
+    return false;
   });
 }
 

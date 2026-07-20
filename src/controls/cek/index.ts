@@ -67,27 +67,36 @@ interface Correlation {
   readonly unresolvable: readonly string[];
 }
 
+/**
+ * Whether a satellite resource satisfies the control for its bucket.
+ * `unresolvable` is distinct from `no`: it means the input cannot tell us,
+ * which must become not-applicable rather than a failure.
+ */
+type Qualification =
+  | { readonly kind: "yes" }
+  | { readonly kind: "no" }
+  | { readonly kind: "unresolvable"; readonly attribute: string };
+
 function correlateByBucket(
   model: ResourceModel,
   type: string,
-  qualifies: (resource: Resource) => boolean,
+  qualifies: (resource: Resource, bucketName: string) => Qualification,
 ): Correlation {
   const names = new Set<string>();
   const unresolvable: string[] = [];
 
   for (const resource of resourcesOfType(model, type)) {
     const read = readAttribute(resource, "bucket");
-    if (read.kind === "unknown") {
-      unresolvable.push(`${resource.address}.bucket`);
-      continue;
-    }
-    const bucket = asText(read);
+    const bucket = read.kind === "unknown" ? undefined : asText(read);
     if (bucket === undefined) {
       unresolvable.push(`${resource.address}.bucket`);
       continue;
     }
-    if (qualifies(resource)) {
+    const qualification = qualifies(resource, bucket);
+    if (qualification.kind === "yes") {
       names.add(bucket);
+    } else if (qualification.kind === "unresolvable") {
+      unresolvable.push(`${resource.address}.${qualification.attribute}`);
     }
   }
   return { names, unresolvable };
@@ -158,7 +167,7 @@ const encryptionAtRest: Check = {
     const findings: Finding[] = [
       ...bucketFindings(
         model,
-        correlateByBucket(model, SSE_CONFIG_TYPE, () => true),
+        correlateByBucket(model, SSE_CONFIG_TYPE, () => ({ kind: "yes" })),
         (covered, name) => ({
           attribute: "bucket",
           observed: covered
@@ -207,7 +216,7 @@ const encryptionAtRest: Check = {
  * condition *key* would also accept `SecureTransport: true` — a policy that
  * denies encrypted traffic and enforces nothing.
  */
-function deniesInsecureTransport(statement: PolicyStatement): boolean {
+export function deniesInsecureTransport(statement: PolicyStatement, bucketName: string): boolean {
   if (statement.effect !== "Deny" || usesInvertedMatch(statement)) {
     return false;
   }
@@ -220,7 +229,15 @@ function deniesInsecureTransport(statement: PolicyStatement): boolean {
   if (!enforcing || !statement.principals.some(isWildcardPrincipal)) {
     return false;
   }
-  return statement.actions.some((action) => action === "*" || action.toLowerCase() === "s3:*");
+  if (!statement.actions.some((action) => action === "*" || action.toLowerCase() === "s3:*")) {
+    return false;
+  }
+  // A deny scoped to some other bucket, or to one prefix of this one, does not
+  // enforce TLS for this bucket's objects — and claiming it does would be a
+  // Pass on an assertion we never made.
+  return statement.resources.some(
+    (resource) => resource === "*" || resource === `arn:aws:s3:::${bucketName}/*`,
+  );
 }
 
 /** CEK-03 — Data Encryption (in transit). */
@@ -233,13 +250,25 @@ const tlsEnforced: Check = {
       return [notApplicable("This input declares no S3 buckets.")];
     }
 
-    const correlation = correlateByBucket(model, "aws_s3_bucket_policy", (policy) => {
+    const correlation = correlateByBucket(model, "aws_s3_bucket_policy", (policy, bucketName) => {
       const read = readAttribute(policy, "policy");
-      if (read.kind !== "value") {
-        return false;
+      // An unreadable document is not evidence that the bucket is unprotected.
+      if (read.kind === "unknown") {
+        return { kind: "unresolvable", attribute: "policy" };
+      }
+      if (read.kind === "absent") {
+        return { kind: "no" };
       }
       const parsed = parsePolicyDocument(read.value);
-      return parsed.kind === "statements" && parsed.statements.some(deniesInsecureTransport);
+      if (parsed.kind === "unparseable") {
+        return { kind: "unresolvable", attribute: "policy" };
+      }
+      if (parsed.kind === "empty") {
+        return { kind: "no" };
+      }
+      return parsed.statements.some((statement) => deniesInsecureTransport(statement, bucketName))
+        ? { kind: "yes" }
+        : { kind: "no" };
     });
 
     return bucketFindings(model, correlation, (covered, name) => ({

@@ -153,24 +153,36 @@ export function isWildcardPrincipal(principal: string): boolean {
 }
 
 /**
- * Condition keys that actually narrow *who* may act. Any other condition on a
- * wildcard-principal Allow constrains something else entirely (transport,
- * region, time) and leaves the principal wide open.
+ * Condition keys that narrow *who* may act, or *from where*. Any other
+ * condition on a wildcard-principal Allow constrains something else entirely
+ * (transport, time of day) and leaves the principal wide open.
+ *
+ * Erring toward a shorter list is safe: a key missing from here yields
+ * not-applicable, never a Pass.
  */
 const PRINCIPAL_CONSTRAINING_KEYS = new Set([
+  // Who
   "aws:principalarn",
   "aws:principalorgid",
   "aws:principalorgpaths",
   "aws:principalaccount",
   "aws:principaltag",
-  "aws:principalistype",
+  "aws:principaltype",
+  "aws:principalisawsservice",
+  "aws:principalservicename",
+  "aws:principalservicenameslist",
+  "aws:userid",
+  "aws:username",
+  "aws:federatedprovider",
+  "sts:externalid",
+  // On whose behalf
   "aws:sourcearn",
   "aws:sourceaccount",
   "aws:sourceowner",
+  // From where
   "aws:sourcevpc",
   "aws:sourcevpce",
   "aws:sourceip",
-  "sts:externalid",
 ]);
 
 export function constrainsPrincipal(statement: PolicyStatement): boolean {
