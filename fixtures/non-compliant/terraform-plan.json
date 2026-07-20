@@ -39,9 +39,7 @@
           "type": "aws_caller_identity",
           "name": "current",
           "provider_name": "registry.terraform.io/hashicorp/aws",
-          "values": {
-            "account_id": "123456789012"
-          }
+          "values": { "account_id": "123456789012" }
         },
         {
           "address": "aws_kms_key.unrotated",
@@ -53,7 +51,8 @@
           "values": {
             "description": "CMK without rotation",
             "enable_key_rotation": false,
-            "deletion_window_in_days": 7
+            "deletion_window_in_days": 7,
+            "customer_master_key_spec": "SYMMETRIC_DEFAULT"
           },
           "sensitive_values": {}
         },
@@ -67,6 +66,51 @@
           "values": {
             "name": "admin-everything",
             "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_iam_role.public",
+          "mode": "managed",
+          "type": "aws_iam_role",
+          "name": "public",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "public",
+            "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":\"sts:AssumeRole\"}]}"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_iam_account_password_policy.weak",
+          "mode": "managed",
+          "type": "aws_iam_account_password_policy",
+          "name": "weak",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "minimum_password_length": 8,
+            "require_uppercase_characters": false,
+            "require_lowercase_characters": true,
+            "require_numbers": true,
+            "require_symbols": false,
+            "password_reuse_prevention": 2,
+            "max_password_age": 0
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_lb_listener.legacy",
+          "mode": "managed",
+          "type": "aws_lb_listener",
+          "name": "legacy",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "port": 443,
+            "protocol": "HTTPS",
+            "ssl_policy": "ELBSecurityPolicy-TLS-1-0-2015-04"
           },
           "sensitive_values": {}
         },
@@ -96,10 +140,35 @@
               "name": "public",
               "provider_name": "registry.terraform.io/hashicorp/aws",
               "schema_version": 0,
-              "values": {
-                "bucket": "example-non-compliant-public"
-              },
+              "values": { "bucket": "example-non-compliant-public" },
               "sensitive_values": {}
+            },
+            {
+              "address": "module.storage.aws_s3_bucket.weak_algorithm",
+              "mode": "managed",
+              "type": "aws_s3_bucket",
+              "name": "weak_algorithm",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
+              "values": { "bucket": "example-non-compliant-weak" },
+              "sensitive_values": {}
+            },
+            {
+              "address": "module.storage.aws_s3_bucket_server_side_encryption_configuration.weak_algorithm",
+              "mode": "managed",
+              "type": "aws_s3_bucket_server_side_encryption_configuration",
+              "name": "weak_algorithm",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
+              "values": {
+                "bucket": "example-non-compliant-weak",
+                "rule": [
+                  {
+                    "apply_server_side_encryption_by_default": [{ "sse_algorithm": "AES128" }]
+                  }
+                ]
+              },
+              "sensitive_values": { "rule": [{}] }
             },
             {
               "address": "module.storage.aws_db_instance.main",
@@ -115,9 +184,7 @@
                 "publicly_accessible": true,
                 "password": "example-not-a-real-password"
               },
-              "sensitive_values": {
-                "password": true
-              }
+              "sensitive_values": { "password": true }
             }
           ]
         }
@@ -134,10 +201,7 @@
       "change": {
         "actions": ["create"],
         "before": null,
-        "after": {
-          "availability_zone": "eu-west-2a",
-          "size": 20
-        },
+        "after": { "availability_zone": "eu-west-2a", "size": 20 },
         "after_unknown": {
           "arn": true,
           "id": true,
@@ -157,17 +221,9 @@
       "change": {
         "actions": ["create"],
         "before": null,
-        "after": {
-          "storage_encrypted": false,
-          "publicly_accessible": true
-        },
-        "after_unknown": {
-          "arn": true,
-          "endpoint": true
-        },
-        "after_sensitive": {
-          "password": true
-        }
+        "after": { "storage_encrypted": false, "publicly_accessible": true },
+        "after_unknown": { "arn": true, "endpoint": true },
+        "after_sensitive": { "password": true }
       }
     }
   ]

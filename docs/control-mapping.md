@@ -47,17 +47,33 @@ from the current mapping. See **ADR-0003**.
 
 `Verdict logic` reads as: **FAIL when …**, otherwise **PASS** (unless stated NA).
 
+## Two rules that keep verdicts honest
+
+**Account-scoped absence is NA, not FAIL.** If a control is governed by an
+account-level singleton (password policy, CloudTrail) and the input declares no
+such resource, we report `not_applicable` with a reason. The account may well
+set it outside this Terraform, and we scan the input, not the account — calling
+that a Fail would be inferring non-compliance we cannot evidence (hard
+constraint 5). The reason names exactly what was looked for, so the gap is
+visible rather than buried. The same applies to resource-scoped controls when
+the input declares no resource of that type.
+
+**Unknown-until-apply is NA, not a guess.** Terraform writes a value it cannot
+compute until apply as `null`, which is indistinguishable from "never set".
+Checks must consult `isUnknown()` (populated from `resource_changes[].change.after_unknown`)
+and report `not_applicable` rather than read the `null` as "not configured".
+
 ---
 
 ## IAM — Identity & Access Management
 
 | CCM ID | Control Title (CCM v4.0) | Check ID | What the scanner checks | Evidence source (AWS / Terraform) | Verdict logic | Coverage |
 |---|---|---|---|---|---|---|
-| **IAM-05** | Least Privilege | `iam/no-wildcard-allow` | No IAM policy `Allow` statement grants `Action:"*"` **and** `Resource:"*"`. | `aws_iam_policy.policy`, `aws_iam_role_policy`, `aws_iam_user_policy`, `aws_iam_group_policy`, `data.aws_iam_policy_document` statements | **FAIL** if any Allow stmt has both action `*` and resource `*`. | Yes |
-| **IAM-16** | Authorization Mechanisms | `iam/no-wildcard-trust` | Role trust policies don't allow a wildcard principal without a condition. | `aws_iam_role.assume_role_policy` (`Principal` / `Principal.AWS` = `*`, `Condition`) | **FAIL** if principal is `*`/`AWS:*` with no `Condition`. | Yes |
-| **IAM-02** | Strong Password Policy and Procedures | `iam/account-password-policy` | Account password policy exists and meets thresholds (min length ≥ 14; require upper/lower/number/symbol; reuse-prevention ≥ 24; max-age ≤ 90). Thresholds are config. | `aws_iam_account_password_policy.*` | **FAIL** if absent or any threshold weaker than configured. | Yes |
-| **IAM-15** | Passwords Management | *(covered by `iam/account-password-policy`)* | Same evidence as IAM-02; reported jointly, cross-referenced. | `aws_iam_account_password_policy.*` | Mirrors IAM-02. | Yes |
-| **IAM-14** | Strong Authentication | `iam/mfa-enforcement-present` | An MFA-enforcing policy condition (`aws:MultiFactorAuthPresent`) is present on privileged access. | IAM policy documents with a `Bool`/`BoolIfExists` MFA condition | **PASS** if MFA-enforcement condition found; **NA** (reason: per-principal MFA enrollment is account runtime state) if none can be found. | Partial |
+| **IAM-05** | Least Privilege | `iam/no-wildcard-allow` | No IAM policy `Allow` statement grants `Action:"*"` **and** `Resource:"*"`. A statement using `NotAction`/`NotResource` is **NA** — an inverted matcher's effective permissions cannot be evaluated by this predicate. | `aws_iam_policy.policy`, `aws_iam_role_policy`, `aws_iam_user_policy`, `aws_iam_group_policy` (managed resources only — ingest drops data sources, so `data.aws_iam_policy_document` is never seen) | **FAIL** if any Allow stmt has both action `*` and resource `*`. | Yes |
+| **IAM-16** | Authorization Mechanisms | `iam/no-wildcard-trust` | Role trust policies don't allow a wildcard principal unless a condition genuinely narrows *who*. Reported **NA**, not Pass, when the condition constrains something else (transport, region); when it is negated (`StringNotEquals`) or a presence test (`Null`); when any of its values matches every principal — AWS ORs a key's values, so the condition is only as narrow as its **widest** one; or when it uses `...IfExists` on a key that some principals do not carry, which admits exactly those principals. | `aws_iam_role.assume_role_policy` (`Principal` / `Principal.AWS` = `*`, `Condition`) | **FAIL** if principal is `*`/`AWS:*` with no `Condition`. | Yes |
+| **IAM-02** | Strong Password Policy and Procedures | `iam/account-password-policy` | Password *strength*: min length ≥ 14, and upper/lower/number/symbol all required. Thresholds are config. | `aws_iam_account_password_policy.minimum_password_length`, `.require_*` | **FAIL** if declared and weaker than configured. **NA** if no policy resource is declared — see *account-scoped absence* below. | Yes |
+| **IAM-15** | Passwords Management | `iam/password-lifecycle` | Password *lifecycle*: reuse prevention ≥ 24 and maximum age ≤ 90 days. Split from IAM-02 because a check carries exactly one control id, so a control sharing another's check would never be reported. | `aws_iam_account_password_policy.password_reuse_prevention`, `.max_password_age` | **FAIL** if declared and weaker than configured. **NA** if no policy resource is declared. | Yes |
+| **IAM-14** | Strong Authentication | `iam/mfa-enforcement-present` | An MFA-enforcing policy condition (`aws:MultiFactorAuthPresent`) is present on privileged access. | IAM policy documents with a `Bool`/`BoolIfExists`/`Null` MFA condition. The operator decides the sense: `Deny` + `Bool:false` and `Deny` + `Null:true` both enforce; the inverses grant *when MFA is absent* and are **NA**. | **PASS** if MFA-enforcement condition found; **NA** (reason: per-principal MFA enrollment is account runtime state) if none can be found. | Partial |
 | **IAM-03** | Identity Inventory | `iam/na-runtime-inventory` | — | — | **NA** — a complete identity inventory requires enumerating live account principals; an IaC module is not authoritative for all identities. *(Becomes checkable in the cloud-snapshot lane.)* | NA |
 | **IAM-08** | User Access Review | `iam/na-process-control` | — | — | **NA** — periodic access-review is a temporal/process control with no signal in declarative infrastructure. | NA |
 
@@ -80,9 +96,9 @@ from the current mapping. See **ADR-0003**.
 
 | CCM ID | Control Title (CCM v4.0) | Check ID | What the scanner checks | Evidence source (AWS / Terraform) | Verdict logic | Coverage |
 |---|---|---|---|---|---|---|
-| **CEK-03** | Data Encryption | `cek/encryption-at-rest` | All in-scope storage encrypts at rest. | `aws_s3_bucket_server_side_encryption_configuration`; `aws_ebs_volume.encrypted`; `aws_db_instance.storage_encrypted`; `aws_rds_cluster.storage_encrypted`; `aws_dynamodb_table.server_side_encryption` | **FAIL** if any in-scope storage resource lacks encryption at rest. | Yes |
-| **CEK-03** | Data Encryption *(in transit)* | `cek/tls-enforced` | S3 buckets deny non-TLS access. | `aws_s3_bucket_policy` with `Deny` on `aws:SecureTransport = false` | **FAIL** if a bucket has no TLS-enforcing deny statement. | Yes |
-| **CEK-04** | Encryption Algorithm | `cek/approved-algorithms` | SSE algorithm and TLS policies are on the approved list (no deprecated TLS on listeners; SSE uses an allowed algorithm/KMS where required). | `...sse_algorithm`; `aws_lb_listener.ssl_policy` | **FAIL** if a disallowed SSE algorithm or a deprecated/weak `ssl_policy` (e.g. permits TLS 1.0/1.1) is used. Allowlist is config. | Yes |
+| **CEK-03** | Data Encryption | `cek/encryption-at-rest` | All in-scope storage encrypts at rest. S3 keeps encryption in a separate resource, correlated by bucket **name**; when a correlator's name is not known until apply the bucket is **NA**, not failed. | `aws_s3_bucket_server_side_encryption_configuration`; `aws_ebs_volume.encrypted`; `aws_db_instance.storage_encrypted`; `aws_rds_cluster.storage_encrypted` | **FAIL** if any in-scope storage resource lacks encryption at rest. | Yes |
+| **CEK-03** | Data Encryption *(in transit)* | `cek/tls-enforced` | S3 buckets deny non-TLS access. The deny must apply to every principal, cover `s3:*`, and name this bucket's objects — a deny scoped to another bucket or one prefix does not enforce TLS here. | `aws_s3_bucket_policy` with `Deny` on `aws:SecureTransport = false` (`Bool`/`BoolIfExists`) | **FAIL** if a bucket has no such statement. **NA** if the policy document is unreadable or not known until apply. | Yes |
+| **CEK-04** | Encryption Algorithm | `cek/approved-algorithms` | SSE algorithm and ELB TLS policy are checked against an **allowlist**, never a denylist: an unrecognised TLS policy is **NA**, not Pass, so a newly-added weak policy cannot slip through. | `...sse_algorithm`; `aws_lb_listener.ssl_policy` | **FAIL** if a disallowed SSE algorithm or a known-weak `ssl_policy` (permits TLS 1.0/1.1) is used. **NA** for an unrecognised policy. | Yes |
 | **CEK-12** | Key Rotation | `cek/kms-key-rotation` | Customer-managed symmetric KMS keys have automatic rotation enabled. | `aws_kms_key.enable_key_rotation` | **FAIL** if any customer-managed CMK has rotation disabled/unset. | Yes |
 | **CEK-01** | Encryption and Key Management Policy and Procedures | `cek/na-governance` | — | — | **NA** — a policy-and-procedures document is governance, not infrastructure. | NA |
 | **CEK-14** | Key Destruction | `cek/na-lifecycle-runtime` | — | — | **NA** — key destruction is a runtime lifecycle operation; `deletion_window_in_days` hints at intent but does not evidence destruction. | NA |

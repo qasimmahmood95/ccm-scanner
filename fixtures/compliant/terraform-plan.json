@@ -33,10 +33,7 @@
             "arn": null,
             "id": null
           },
-          "sensitive_values": {
-            "ingress": [{}],
-            "egress": [{}]
-          }
+          "sensitive_values": { "ingress": [{}], "egress": [{}] }
         },
         {
           "address": "data.aws_caller_identity.current",
@@ -44,9 +41,7 @@
           "type": "aws_caller_identity",
           "name": "current",
           "provider_name": "registry.terraform.io/hashicorp/aws",
-          "values": {
-            "account_id": "123456789012"
-          }
+          "values": { "account_id": "123456789012" }
         },
         {
           "address": "aws_kms_key.logs",
@@ -59,6 +54,7 @@
             "description": "CMK for log encryption",
             "enable_key_rotation": true,
             "deletion_window_in_days": 30,
+            "customer_master_key_spec": "SYMMETRIC_DEFAULT",
             "arn": null,
             "key_id": null
           },
@@ -81,6 +77,45 @@
             "max_password_age": 90
           },
           "sensitive_values": {}
+        },
+        {
+          "address": "aws_iam_policy.read_only",
+          "mode": "managed",
+          "type": "aws_iam_policy",
+          "name": "read_only",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "read-only-logs",
+            "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"],\"Resource\":\"arn:aws:s3:::example-compliant-logs/*\"}]}"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_iam_policy.require_mfa",
+          "mode": "managed",
+          "type": "aws_iam_policy",
+          "name": "require_mfa",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "require-mfa",
+            "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":[\"iam:*\"],\"Resource\":\"*\",\"Condition\":{\"BoolIfExists\":{\"aws:MultiFactorAuthPresent\":\"false\"}}}]}"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_iam_role.app",
+          "mode": "managed",
+          "type": "aws_iam_role",
+          "name": "app",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "app",
+            "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
+          },
+          "sensitive_values": {}
         }
       ],
       "child_modules": [
@@ -95,8 +130,36 @@
               "index": "primary",
               "provider_name": "registry.terraform.io/hashicorp/aws",
               "schema_version": 0,
+              "values": { "bucket": "example-compliant-logs" },
+              "sensitive_values": {}
+            },
+            {
+              "address": "module.storage.aws_s3_bucket_server_side_encryption_configuration.logs",
+              "mode": "managed",
+              "type": "aws_s3_bucket_server_side_encryption_configuration",
+              "name": "logs",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
               "values": {
-                "bucket": "example-compliant-logs"
+                "bucket": "example-compliant-logs",
+                "rule": [
+                  {
+                    "apply_server_side_encryption_by_default": [{ "sse_algorithm": "aws:kms" }]
+                  }
+                ]
+              },
+              "sensitive_values": { "rule": [{}] }
+            },
+            {
+              "address": "module.storage.aws_s3_bucket_policy.logs",
+              "mode": "managed",
+              "type": "aws_s3_bucket_policy",
+              "name": "logs",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
+              "values": {
+                "bucket": "example-compliant-logs",
+                "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":\"arn:aws:s3:::example-compliant-logs/*\",\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
               },
               "sensitive_values": {}
             },
@@ -128,8 +191,36 @@
                   "name": "archive",
                   "provider_name": "registry.terraform.io/hashicorp/aws",
                   "schema_version": 0,
+                  "values": { "bucket": "example-compliant-archive" },
+                  "sensitive_values": {}
+                },
+                {
+                  "address": "module.storage.module.replica.aws_s3_bucket_server_side_encryption_configuration.archive",
+                  "mode": "managed",
+                  "type": "aws_s3_bucket_server_side_encryption_configuration",
+                  "name": "archive",
+                  "provider_name": "registry.terraform.io/hashicorp/aws",
+                  "schema_version": 0,
                   "values": {
-                    "bucket": "example-compliant-archive"
+                    "bucket": "example-compliant-archive",
+                    "rule": [
+                      {
+                        "apply_server_side_encryption_by_default": [{ "sse_algorithm": "aws:kms" }]
+                      }
+                    ]
+                  },
+                  "sensitive_values": { "rule": [{}] }
+                },
+                {
+                  "address": "module.storage.module.replica.aws_s3_bucket_policy.archive",
+                  "mode": "managed",
+                  "type": "aws_s3_bucket_policy",
+                  "name": "archive",
+                  "provider_name": "registry.terraform.io/hashicorp/aws",
+                  "schema_version": 0,
+                  "values": {
+                    "bucket": "example-compliant-archive",
+                    "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":\"arn:aws:s3:::example-compliant-archive/*\",\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
                   },
                   "sensitive_values": {}
                 }
@@ -155,11 +246,7 @@
           "enable_key_rotation": true,
           "deletion_window_in_days": 30
         },
-        "after_unknown": {
-          "arn": true,
-          "key_id": true,
-          "policy": true
-        },
+        "after_unknown": { "arn": true, "key_id": true, "policy": true },
         "after_sensitive": {}
       }
     },
@@ -172,15 +259,8 @@
       "change": {
         "actions": ["create"],
         "before": null,
-        "after": {
-          "name": "web"
-        },
-        "after_unknown": {
-          "arn": true,
-          "id": true,
-          "ingress": [{}],
-          "egress": [{}]
-        },
+        "after": { "name": "web" },
+        "after_unknown": { "arn": true, "id": true, "ingress": [{}], "egress": [{}] },
         "after_sensitive": {}
       }
     }

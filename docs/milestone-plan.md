@@ -100,8 +100,12 @@ tests pass.
 - Explicit `not_applicable` registrations with reasons: **IAM-03**, **IAM-08**,
   **CEK-01**, **CEK-14** (demonstrates honest scoping).
 - Compliant + non-compliant fixtures per check.
-- CI **scanner-against-fixtures** job introduced here: runs headlessly, asserts
-  exit code and the flagged control IDs.
+- **Fixtures-as-gate, in two halves.** The *control-ID* half lands here and runs
+  in CI through `npm test`: `test/controls/fixtures.test.ts` scans both fixtures
+  and asserts the compliant one is clean while the non-compliant one is flagged
+  with the correct CCM ids, and `fixture coverage (ADR-0003)` asserts every
+  Yes/Partial control has both a failing and a passing case. The *exit-code*
+  half needs a CLI to have an exit code, so it defers to **M5**.
 
 **Exit criteria:** every non-compliant fixture is flagged with the correct CCM
 ID; compliant fixtures produce zero Fails; NA controls report NA with reasons.
