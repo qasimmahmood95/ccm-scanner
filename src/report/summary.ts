@@ -204,6 +204,23 @@ export function renderSummary(report: Report): string {
   lines.push(`| Generated | ${tableCell(report.metadata.generatedAt)} |`);
   lines.push("");
 
+  // Placed before the results, not after: a warning means the scan may not
+  // have read everything it was pointed at, which changes how the counts
+  // below should be read.
+  if (report.warnings.length > 0) {
+    lines.push("## Input warnings");
+    lines.push("");
+    lines.push(
+      `The input was not fully understood. ${String(report.warnings.length)} note(s) follow; ` +
+        "verdicts below cover only what could be read.",
+    );
+    lines.push("");
+    for (const warning of report.warnings) {
+      lines.push(`- ${inlineText(warning)}`);
+    }
+    lines.push("");
+  }
+
   if (report.domains.length > 0) {
     lines.push("## Coverage by domain");
     lines.push("");

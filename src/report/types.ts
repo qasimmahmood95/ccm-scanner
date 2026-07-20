@@ -2,7 +2,7 @@ import type { CcmDomain } from "../model/ccm.js";
 import type { Verdict } from "../model/verdict.js";
 
 /** Bumped when the report JSON shape changes incompatibly. */
-export const REPORT_SCHEMA_VERSION = "1.0.0";
+export const REPORT_SCHEMA_VERSION = "1.1.0";
 
 export interface ToolInfo {
   readonly name: string;
@@ -58,5 +58,14 @@ export interface Report {
   readonly findings: StatusCounts;
   /** Only domains that produced verdicts, in canonical domain order. */
   readonly domains: readonly DomainRollup[];
+  /**
+   * Non-fatal notes from ingestion — a skipped entry, an ambiguous shape.
+   *
+   * These belong in the report rather than on stderr: a scan that quietly
+   * dropped a module subtree produces a clean-looking report over an input it
+   * did not fully read, and an auditor reading the artifact months later has no
+   * other way to know.
+   */
+  readonly warnings: readonly string[];
   readonly verdicts: readonly Verdict[];
 }

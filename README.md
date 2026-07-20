@@ -6,10 +6,11 @@
 > **Pass**, **Fail**, or **Not-Applicable**, each verdict carrying its CCM control
 > ID and the evidence it was derived from.
 
-> **Status — early scaffold (milestone M0).** Governance, toolchain, and the
-> auditable control mapping are in place. The scanner engine and the checks land in
-> the milestones that follow — see the [milestone plan](docs/milestone-plan.md).
-> Commands marked _(planned)_ below are not implemented yet.
+> **Status — milestone M5.** The engine, the four-domain control slice, the CLI
+> and the evidence pack are implemented and run headlessly over the committed
+> fixtures. The read-only cloud-snapshot lane lands in M6 — see the
+> [milestone plan](docs/milestone-plan.md). Anything marked _(planned)_ below is
+> not implemented yet.
 
 ## Why this exists
 
@@ -44,21 +45,73 @@ Controls that cannot be evidenced from IaC are reported **Not-Applicable with a
 reason** — never guessed. The full table is the source of truth:
 [`docs/control-mapping.md`](docs/control-mapping.md).
 
-## Planned usage
-
-_(planned — CLI lands in M5)_
+## Usage
 
 ```bash
-ccm-scanner scan \
-  --input <plan.json | hcl-dir/ | snapshot.json> \
-  --controls <iam,log,cek,ivs | IAM-05,CEK-12 | all> \
-  --format json|md|both \
-  --out ./report \
-  --fail-on fail|none
+npm install && npm run build
+node dist/cli/index.js scan --input plan.json
 ```
 
-Exit code is **0** when there are no `Fail` verdicts, **non-zero** when any control
-`Fail`s (unless `--fail-on none`) — so CI can run it headlessly against fixtures.
+The input is the JSON that `terraform show -json` produces — of a **saved plan
+file** or of **state**:
+
+```bash
+terraform plan -out=tfplan
+terraform show -json tfplan > plan.json     # what this tool reads
+```
+
+Note this is *not* `terraform plan -json`, which emits a newline-delimited log
+stream rather than a plan representation. The scanner detects that mistake and
+names the right command.
+
+### Options
+
+```bash
+ccm-scanner scan   --input <plan.json>                       # terraform show -json output
+  --controls <all | iam,log,cek,ivs | IAM-05,CEK-12>   # default: all
+  --format <json | md | both>               # default: md
+  --out <dir>                               # default: stdout
+  --fail-on <fail | none>                   # default: fail
+  --generated-at <iso>                      # fix the timestamp, for reproducible output
+```
+
+`--controls` reads as a **union**: `--controls iam,CEK-12` scans the whole IAM
+domain *plus* CEK-12. A selector that matches nothing is a usage error rather
+than an empty, passing scan.
+
+### Exit codes
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | No control failed — or failures were found and `--fail-on none` was passed |
+| `1` | At least one control failed |
+| `2` | Usage error: bad flag, unreadable input, selector matching nothing |
+
+Warnings never change the exit code. They mean the scanner could not fully read
+its input, which is recorded *in* the report rather than escalated into a build
+failure.
+
+### The evidence pack
+
+With `--out`, the scanner writes:
+
+- **`report.json`** — the machine-readable evidence pack, validated against
+  [`schemas/report.schema.json`](schemas/report.schema.json). Run metadata, the
+  pinned CCM version, a sha256 of the input, per-domain roll-ups at both control
+  and finding granularity, and every verdict with its evidence.
+- **`summary.md`** — the human-readable summary, grouped by domain, with each
+  `Fail` and `N/A` expanded with its evidence or reason.
+
+Both are **byte-reproducible** for a fixed input and `--generated-at`, which is
+what makes the pack usable as an audit artifact rather than a snapshot of a
+moment. Values Terraform marks sensitive are redacted before either document is
+rendered.
+
+```bash
+ccm-scanner scan -i plan.json --format both --out ./report
+# FAIL: 13 failed, 0 passed, 9 not applicable across 22 controls.
+# Evidence pack written to /path/to/report
+```
 
 ### Homelab / real-account lane _(planned — M6)_
 
@@ -84,7 +137,8 @@ npm run lint       # eslint
 npm run format     # prettier --write
 npm test           # vitest
 npm run build      # tsc -> dist/
-npm run scan       # run the (stub) CLI via tsx
+npm run scan       # run the CLI from source via tsx
+npm run verify:fixtures  # build, then assert the CLI's exit codes over fixtures
 ```
 
 Conventions: TypeScript strict ESM, vitest, eslint + prettier, Conventional Commits

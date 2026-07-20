@@ -213,7 +213,11 @@ function rollUpByDomain(verdicts: readonly Verdict[]): readonly DomainRollup[] {
  * the caller's order, so the same input yields a byte-identical report whatever
  * produced the verdicts.
  */
-export function buildReport(verdicts: readonly Verdict[], metadata: RunMetadata): Report {
+export function buildReport(
+  verdicts: readonly Verdict[],
+  metadata: RunMetadata,
+  warnings: readonly string[] = [],
+): Report {
   validateMetadata(metadata);
   assertVerdictsAreWellFormed(verdicts);
 
@@ -229,6 +233,7 @@ export function buildReport(verdicts: readonly Verdict[], metadata: RunMetadata)
     controls,
     findings,
     domains: rollUpByDomain(ordered),
+    warnings: [...warnings],
     verdicts: ordered,
   };
 }
