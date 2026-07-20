@@ -1,7 +1,7 @@
 import type { Check } from "../../engine/check.js";
 import { resourcesOfType } from "../../model/resource.js";
 import { fail, notApplicable, pass, type Evidence, type Finding } from "../../model/verdict.js";
-import { readAttribute, unknownReason } from "../support/attributes.js";
+import { asText, readAttribute, unknownReason } from "../support/attributes.js";
 import { correlateBy, correlatedFindings, S3_BUCKET } from "../support/correlate.js";
 import {
   collectIngressRules,
@@ -132,23 +132,28 @@ const publicExposure: Check = {
       );
     }
 
-    for (const instance of resourcesOfType(model, "aws_db_instance")) {
-      const read = readAttribute(instance, "publicly_accessible");
-      if (read.kind === "unknown") {
-        findings.push(notApplicable(unknownReason(instance, "publicly_accessible")));
-        continue;
+    // Aurora puts the endpoint on the cluster's instances, not on the cluster,
+    // so omitting this type would let a publicly-addressable Aurora instance
+    // scan clean.
+    for (const type of ["aws_db_instance", "aws_rds_cluster_instance"]) {
+      for (const instance of resourcesOfType(model, type)) {
+        const read = readAttribute(instance, "publicly_accessible");
+        if (read.kind === "unknown") {
+          findings.push(notApplicable(unknownReason(instance, "publicly_accessible")));
+          continue;
+        }
+        // Terraform defaults this to false, so absent is a genuine "not public".
+        const value = read.kind === "value" ? read.value : false;
+        const evidence: Evidence[] = [
+          {
+            resourceAddress: instance.address,
+            attribute: "publicly_accessible",
+            observed: value,
+            expected: "false",
+          },
+        ];
+        findings.push(value === true ? fail(evidence) : pass(evidence));
       }
-      // Terraform defaults this to false, so absent is a genuine "not public".
-      const value = read.kind === "value" ? read.value : false;
-      const evidence: Evidence[] = [
-        {
-          resourceAddress: instance.address,
-          attribute: "publicly_accessible",
-          observed: value,
-          expected: "false",
-        },
-      ];
-      findings.push(value === true ? fail(evidence) : pass(evidence));
     }
 
     if (findings.length === 0) {
@@ -179,17 +184,18 @@ const defaultSgLockedDown: Check = {
   ccmTitle: "Segmentation and Segregation",
   run: (model) => {
     const groups = resourcesOfType(model, DEFAULT_SG_TYPE);
-    if (groups.length === 0) {
+    const vpcs = resourcesOfType(model, "aws_vpc");
+    if (groups.length === 0 && vpcs.length === 0) {
       return [
         notApplicable(
-          `This input declares no ${DEFAULT_SG_TYPE}, so the default security group is left ` +
-            `unmanaged. Its rules exist in the account but are not visible here, so whether ` +
-            `it is locked down cannot be evidenced.`,
+          `This input declares no ${DEFAULT_SG_TYPE} and no VPC, so the default security ` +
+            `group is left unmanaged. Its rules exist in the account but are not visible ` +
+            `here, so whether it is locked down cannot be evidenced.`,
         ),
       ];
     }
 
-    return groups.map((group): Finding => {
+    const findings: Finding[] = groups.map((group): Finding => {
       const evidence: Evidence[] = [];
       let rules = 0;
 
@@ -198,7 +204,15 @@ const defaultSgLockedDown: Check = {
         if (read.kind === "unknown") {
           return notApplicable(unknownReason(group, attribute));
         }
-        const declared = read.kind === "value" && Array.isArray(read.value) ? read.value : [];
+        // A present-but-non-array value is not "no rules" — saying so would be
+        // evidence asserting something the input never said.
+        if (read.kind === "value" && !Array.isArray(read.value)) {
+          return notApplicable(
+            `${group.address}.${attribute} is not a list of rules, so whether the default ` +
+              `security group carries any cannot be evidenced.`,
+          );
+        }
+        const declared = read.kind === "value" ? (read.value as readonly unknown[]) : [];
         rules += declared.length;
         evidence.push({
           resourceAddress: group.address,
@@ -210,6 +224,36 @@ const defaultSgLockedDown: Check = {
 
       return rules > 0 ? fail(evidence) : pass(evidence);
     });
+
+    // A VPC created here whose default group is never adopted is not a silent
+    // pass: AWS creates that group with allow-all-from-itself ingress and
+    // allow-all egress, and this input neither replaces nor shows them. Naming
+    // the VPC is what keeps the gap visible instead of buried.
+    const adopted = new Set(
+      groups.flatMap((group) => {
+        const vpcId = asText(readAttribute(group, "vpc_id"));
+        return vpcId === undefined ? [] : [vpcId];
+      }),
+    );
+    for (const vpc of vpcs) {
+      const id = asText(readAttribute(vpc, "id"));
+      if (id !== undefined && adopted.has(id)) {
+        continue;
+      }
+      findings.push(
+        notApplicable(
+          id === undefined
+            ? `${vpc.address} cannot be matched to a ${DEFAULT_SG_TYPE}: its id is not known ` +
+                `until apply, so whether its default security group is locked down cannot be ` +
+                `evidenced from this input.`
+            : `${vpc.address} declares no ${DEFAULT_SG_TYPE}, so its default security group ` +
+                `keeps the rules AWS created it with — allow-all from itself, and allow-all ` +
+                `egress. Those rules are not visible here, so this is reported rather than failed.`,
+        ),
+      );
+    }
+
+    return findings;
   },
 };
 

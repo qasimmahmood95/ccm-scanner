@@ -284,14 +284,40 @@ describe("ivs/no-open-admin-ports", () => {
   });
 
   // ICMP reuses from_port/to_port as type and code, so treating them as TCP
-  // ports would compare unrelated numbers and invent a failure.
-  it("passes world-open ICMP, whose port fields are type and code", () => {
+  // ports would compare unrelated numbers and invent a failure. The type must
+  // exceed a sensitive port for this to discriminate: an `icmp 8 -> 0` case
+  // spans [0,8], which contains no sensitive port and so passes either way.
+  it("passes world-open ICMPv6 whose type spans a sensitive port number", () => {
     expect(
       statusOf(
         "ivs/no-open-admin-ports",
-        sg([{ from_port: 8, to_port: 0, protocol: "icmp", cidr_blocks: ["0.0.0.0/0"] }]),
+        sg([{ from_port: 128, to_port: 0, protocol: "icmpv6", cidr_blocks: ["0.0.0.0/0"] }]),
       ),
     ).toBe("pass");
+  });
+
+  // Every port in the list, not just the three that happen to appear elsewhere.
+  for (const port of [22, 3389, 3306, 5432, 1433, 27017, 6379]) {
+    it(`fails world-open port ${String(port)}`, () => {
+      expect(
+        statusOf("ivs/no-open-admin-ports", sg([open({ from_port: port, to_port: port })])),
+      ).toBe("fail");
+    });
+  }
+
+  it("reads a port carried as a string", () => {
+    expect(
+      statusOf("ivs/no-open-admin-ports", sg([open({ from_port: "22", to_port: "22" })])),
+    ).toBe("fail");
+  });
+
+  it("ignores surrounding whitespace in a CIDR", () => {
+    expect(
+      statusOf(
+        "ivs/no-open-admin-ports",
+        sg([{ from_port: 22, to_port: 22, protocol: "tcp", cidr_blocks: [" 0.0.0.0/0 "] }]),
+      ),
+    ).toBe("fail");
   });
 
   it("is not_applicable when the ingress block is not known until apply", () => {
@@ -420,6 +446,210 @@ describe("ivs/default-sg-locked-down", () => {
     const finding = run("ivs/default-sg-locked-down", model(bucket()))[0];
     expect(finding?.status).toBe("not_applicable");
     expect(finding?.reason).toContain("unmanaged");
+  });
+});
+
+/**
+ * Every case below is a verdict the M4 review gate found wrong, or found
+ * correct but unpinned. Both are worth a test: the second class is how a fix
+ * silently regresses.
+ */
+describe("regressions found by the M4 review gate", () => {
+  const sgRule = (values: Record<string, unknown>, unknown: readonly string[] = []): Resource =>
+    resource("aws_security_group_rule.r", "aws_security_group_rule", values, unknown);
+
+  // MB-1. A flow log may legitimately target a subnet or ENI, leaving vpc_id
+  // absent; reading that as "unreadable" let one compliant resource suppress
+  // the Fail for every uncovered VPC in the input.
+  it("fails an uncovered VPC despite a subnet-scoped flow log", () => {
+    const input = model(
+      resource("aws_vpc.main", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_flow_log.subnet", "aws_flow_log", { subnet_id: "subnet-b" }),
+    );
+    expect(statusOf("log/vpc-flow-logs", input)).toBe("fail");
+  });
+
+  it("fails every uncovered VPC when the only flow log is ENI-scoped", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_vpc.b", "aws_vpc", { id: "vpc-b" }),
+      resource("aws_flow_log.eni", "aws_flow_log", { eni_id: "eni-1" }),
+    );
+    expect(statusesOf("log/vpc-flow-logs", input)).toEqual(["fail", "fail"]);
+  });
+
+  // MB-2. The newer rule shape guarded cidr_ipv6; this one did not guard its
+  // equivalent, so a Pass was reported citing an empty CIDR list as evidence.
+  it("is not_applicable when a standalone rule's ipv6_cidr_blocks is unknown", () => {
+    const input = model(
+      sgRule(
+        {
+          type: "ingress",
+          from_port: 22,
+          to_port: 22,
+          protocol: "tcp",
+          cidr_blocks: [],
+          ipv6_cidr_blocks: null,
+        },
+        ["ipv6_cidr_blocks"],
+      ),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+  });
+
+  // SF-1. Either signal satisfies LOG-04, so an unknown CloudWatch ARN — the
+  // ordinary shape when it references a log group built in the same plan —
+  // must not hide a bucket that demonstrably has access logging.
+  it("passes on access logging even when the CloudWatch ARN is unknown", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", cloud_watch_logs_group_arn: null }, [
+        "cloud_watch_logs_group_arn",
+      ]),
+      bucket(),
+      resource("aws_s3_bucket_logging.logs", "aws_s3_bucket_logging", { bucket: "logs" }),
+    );
+    expect(statusOf("log/cloudtrail-accountability", input)).toBe("pass");
+  });
+
+  it("declines rather than fails when the CloudWatch ARN is unknown and the bucket is not logged", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", cloud_watch_logs_group_arn: null }, [
+        "cloud_watch_logs_group_arn",
+      ]),
+      bucket(),
+    );
+    expect(statusOf("log/cloudtrail-accountability", input)).toBe("not_applicable");
+  });
+
+  // SF-2. A single-region trail is single-region whatever the other flag turns
+  // out to be, so the evidenced failure must survive an unknown sibling.
+  it("still fails a single-region trail when a sibling flag is unknown", () => {
+    const input = model(
+      trail({ is_multi_region_trail: false, include_global_service_events: null }, [
+        "include_global_service_events",
+      ]),
+    );
+    expect(statusOf("log/cloudtrail-multi-region", input)).toBe("fail");
+  });
+
+  // SF-3. Uncertainty about one bucket said nothing about any other, yet it
+  // converted every subject's verdict to not-applicable.
+  it("confines an unknown flag to the bucket it belongs to", () => {
+    const input = model(
+      resource("aws_s3_bucket.a", "aws_s3_bucket", { bucket: "a" }),
+      resource("aws_s3_bucket.b", "aws_s3_bucket", { bucket: "b" }),
+      resource(
+        "aws_s3_bucket_public_access_block.b",
+        "aws_s3_bucket_public_access_block",
+        { bucket: "b", block_public_acls: null },
+        ["block_public_acls"],
+      ),
+    );
+    expect(statusesOf("ivs/s3-public-access-block", input)).toEqual(["fail", "not_applicable"]);
+  });
+
+  // SF-4. Only an explicit "egress" is safe to drop; anything else means we do
+  // not know what we are looking at.
+  it("is not_applicable when a standalone rule's type is unknown", () => {
+    const input = model(
+      sgRule(
+        { type: null, from_port: 22, to_port: 22, protocol: "tcp", cidr_blocks: ["0.0.0.0/0"] },
+        ["type"],
+      ),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+  });
+
+  // SF-5. A VPC created here whose default group is never adopted keeps the
+  // rules AWS gave it, and the reason has to name the VPC.
+  it("names a VPC whose default security group is never adopted", () => {
+    const finding = run(
+      "ivs/default-sg-locked-down",
+      model(resource("aws_vpc.main", "aws_vpc", { id: "vpc-a" })),
+    )[0];
+    expect(finding?.status).toBe("not_applicable");
+    expect(finding?.reason).toContain("aws_vpc.main");
+  });
+
+  it("stays silent about a VPC whose default group is adopted and locked", () => {
+    const input = model(
+      resource("aws_vpc.main", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_default_security_group.d", "aws_default_security_group", {
+        vpc_id: "vpc-a",
+        ingress: [],
+        egress: [],
+      }),
+    );
+    expect(statusesOf("ivs/default-sg-locked-down", input)).toEqual(["pass"]);
+  });
+
+  // FU-1. Defaulting a missing protocol to "-1" means *every protocol*, which
+  // manufactured an "all ports open to the world" failure out of a gap.
+  it("declines rather than fabricating a failure when the protocol is missing", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ from_port: 443, to_port: 443, cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+  });
+
+  it("declines a TCP rule whose ports are absent", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: "tcp", cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("not_applicable");
+  });
+
+  // FU-2. "no rules" is an assertion, and a non-list value does not support it.
+  it("declines a default security group whose ingress is not a list", () => {
+    const input = model(
+      resource("aws_default_security_group.d", "aws_default_security_group", {
+        ingress: "all",
+        egress: [],
+      }),
+    );
+    expect(statusOf("ivs/default-sg-locked-down", input)).toBe("not_applicable");
+  });
+
+  // FU-3. Aurora puts the endpoint on the cluster's instances.
+  it("fails a publicly accessible Aurora cluster instance", () => {
+    const input = model(
+      resource("aws_rds_cluster_instance.a", "aws_rds_cluster_instance", {
+        publicly_accessible: true,
+      }),
+    );
+    expect(statusOf("ivs/s3-public-access-block", input)).toBe("fail");
+  });
+
+  // L01. The guard that stops an unknown trail-side flag becoming a Fail on
+  // the bucket's behalf — the exact failure mode this milestone is about.
+  it("declines when log-file validation is unknown and the bucket is unprotected", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", enable_log_file_validation: null }, [
+        "enable_log_file_validation",
+      ]),
+      bucket(),
+    );
+    expect(statusOf("log/cloudtrail-log-validation", input)).toBe("not_applicable");
+  });
+
+  // I14. The partial-block case was pinned only under the LOG check, leaving
+  // the control whose headline promise it is unguarded.
+  it("fails a three-of-four public-access block under its own control", () => {
+    const input = model(
+      bucket(),
+      resource("aws_s3_bucket_public_access_block.logs", "aws_s3_bucket_public_access_block", {
+        bucket: "logs",
+        block_public_acls: true,
+        block_public_policy: true,
+        ignore_public_acls: true,
+        restrict_public_buckets: false,
+      }),
+    );
+    expect(statusOf("ivs/s3-public-access-block", input)).toBe("fail");
   });
 });
 

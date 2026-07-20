@@ -22,6 +22,15 @@ export type Cause = "unknown" | "unreadable";
 export interface Unresolvable {
   readonly what: string;
   readonly cause: Cause;
+  /**
+   * The subject this uncertainty applies to, when we resolved it.
+   *
+   * An unknown flag on *one* bucket's public-access block says nothing about
+   * any other bucket, so without this every subject of the type would be
+   * reported not-applicable because of an unrelated resource. `undefined` means
+   * we could not tell which subject it belonged to, and it does apply broadly.
+   */
+  readonly subjectKey?: string;
 }
 
 /** Subject keys that satisfy some control, plus the correlators we could not resolve. */
@@ -51,6 +60,17 @@ export function describeUnresolvable(entries: readonly Unresolvable[]): string {
 }
 
 /**
+ * What an *absent* key attribute means for this satellite type.
+ *
+ * For an S3 satellite, a missing `bucket` is malformed input — we cannot say
+ * the bucket is unconfigured, so it counts as uncertainty. But an
+ * `aws_flow_log` may legitimately target a subnet or an ENI instead of a VPC,
+ * and then `vpc_id` is simply absent. Reading that as uncertainty lets one
+ * compliant subnet flow log suppress the Fail for every uncovered VPC.
+ */
+export type AbsentKey = "skip" | "unresolvable";
+
+/**
  * Collects the subject keys covered by satellites of `type`.
  *
  * `keyAttribute` is the satellite's pointer back at its subject —
@@ -61,12 +81,17 @@ export function correlateBy(
   type: string,
   keyAttribute: string,
   qualifies: (resource: Resource, key: string) => Qualification,
+  absentKey: AbsentKey = "unresolvable",
 ): Correlation {
   const keys = new Set<string>();
   const unresolvable: Unresolvable[] = [];
 
   for (const resource of resourcesOfType(model, type)) {
     const read = readAttribute(resource, keyAttribute);
+    if (read.kind === "absent" && absentKey === "skip") {
+      // Not a satellite of this subject kind at all.
+      continue;
+    }
     const key = read.kind === "unknown" ? undefined : asText(read);
     if (key === undefined) {
       unresolvable.push({
@@ -79,13 +104,22 @@ export function correlateBy(
     if (qualification.kind === "yes") {
       keys.add(key);
     } else if (qualification.kind === "unresolvable") {
+      // The subject resolved, so this uncertainty is confined to it.
       unresolvable.push({
         what: `${resource.address}.${qualification.attribute}`,
         cause: qualification.cause,
+        subjectKey: key,
       });
     }
   }
   return { keys, unresolvable };
+}
+
+/** The uncertainty that actually bears on one subject. */
+function blockingFor(correlation: Correlation, key: string): readonly Unresolvable[] {
+  return correlation.unresolvable.filter(
+    (entry) => entry.subjectKey === undefined || entry.subjectKey === key,
+  );
 }
 
 /** A subject type and the attribute that identifies it to its satellites. */
@@ -95,6 +129,8 @@ export interface Subject {
   readonly keyAttribute: string;
   /** Singular noun for the reason text, e.g. `bucket`, `VPC`. */
   readonly noun: string;
+  /** How to name the key in a reason, e.g. `bucket name`, `id`. */
+  readonly keyNoun: string;
 }
 
 /** One finding per subject: covered is a Pass, uncorrelatable is not-applicable. */
@@ -112,15 +148,16 @@ export function correlatedFindings(
     const key = asText(read);
     if (key === undefined) {
       return notApplicable(
-        `${resource.address} has no resolvable ${subject.keyAttribute}, so its configuration ` +
+        `${resource.address} has no resolvable ${subject.keyNoun}, so its configuration ` +
           `cannot be correlated.`,
       );
     }
     const covered = correlation.keys.has(key);
-    if (!covered && correlation.unresolvable.length > 0) {
+    const blocking = blockingFor(correlation, key);
+    if (!covered && blocking.length > 0) {
       return notApplicable(
         `${resource.address} cannot be correlated: ` +
-          `${describeUnresolvable(correlation.unresolvable)}, so a configuration targeting ` +
+          `${describeUnresolvable(blocking)}, so a configuration targeting ` +
           `this ${subject.noun} may exist without being visible here.`,
       );
     }
@@ -138,8 +175,9 @@ export function correlatedFindings(
  * about how it is configured, so it cannot be a Fail.
  */
 export type Coverage =
-  | { readonly kind: "covered" }
-  | { readonly kind: "uncovered" }
+  /** `address` is the subject resource, so evidence can cite it rather than the caller. */
+  | { readonly kind: "covered"; readonly address: string }
+  | { readonly kind: "uncovered"; readonly address: string }
   | { readonly kind: "undeclared" }
   | { readonly kind: "unresolvable"; readonly detail: string };
 
@@ -149,20 +187,32 @@ export function coverageOf(
   correlation: Correlation,
   key: string,
 ): Coverage {
-  if (correlation.keys.has(key)) {
-    return { kind: "covered" };
-  }
-  const declared = resourcesOfType(model, subject.type).some(
+  const declared = resourcesOfType(model, subject.type).find(
     (resource) => asText(readAttribute(resource, subject.keyAttribute)) === key,
   );
-  if (!declared) {
+  if (declared === undefined) {
     return { kind: "undeclared" };
   }
-  if (correlation.unresolvable.length > 0) {
-    return { kind: "unresolvable", detail: describeUnresolvable(correlation.unresolvable) };
+  if (correlation.keys.has(key)) {
+    return { kind: "covered", address: declared.address };
   }
-  return { kind: "uncovered" };
+  const blocking = blockingFor(correlation, key);
+  if (blocking.length > 0) {
+    return { kind: "unresolvable", detail: describeUnresolvable(blocking) };
+  }
+  return { kind: "uncovered", address: declared.address };
 }
 
-export const S3_BUCKET: Subject = { type: "aws_s3_bucket", keyAttribute: "bucket", noun: "bucket" };
-export const VPC: Subject = { type: "aws_vpc", keyAttribute: "id", noun: "VPC" };
+export const S3_BUCKET: Subject = {
+  type: "aws_s3_bucket",
+  keyAttribute: "bucket",
+  noun: "bucket",
+  keyNoun: "bucket name",
+};
+
+export const VPC: Subject = {
+  type: "aws_vpc",
+  keyAttribute: "id",
+  noun: "VPC",
+  keyNoun: "id",
+};

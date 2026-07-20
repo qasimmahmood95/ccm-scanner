@@ -85,8 +85,42 @@ function asCidrList(value: unknown): readonly string[] {
   return value.filter((entry): entry is string => typeof entry === "string");
 }
 
-function asProtocol(value: unknown): string {
-  return typeof value === "string" ? value.toLowerCase() : String(value ?? "-1").toLowerCase();
+/**
+ * Terraform accepts a protocol as a name or an IANA number, so a numeric value
+ * is legitimate. Anything else is unreadable — and must stay `undefined` rather
+ * than defaulting to `-1`, which means *every protocol* and would fabricate a
+ * "all ports open to the world" failure out of a missing field.
+ */
+function asProtocol(value: unknown): string | undefined {
+  if (typeof value === "string" && value !== "") {
+    return value.toLowerCase();
+  }
+  return typeof value === "number" ? String(value) : undefined;
+}
+
+/**
+ * Accepts a rule only if the fields the verdict depends on are readable.
+ *
+ * A rule missing its protocol, or missing its ports where the protocol makes
+ * ports meaningful, cannot be judged either way — reporting it as compliant
+ * would be a Pass with nothing behind it.
+ */
+function classify(
+  rule: Omit<IngressRule, "protocol"> & { readonly protocol: string | undefined },
+  into: { rules: IngressRule[]; unreadable: UnreadableRule[] },
+): void {
+  if (rule.protocol === undefined) {
+    into.unreadable.push({ source: rule.source, attribute: "protocol" });
+    return;
+  }
+  const settled: IngressRule = { ...rule, protocol: rule.protocol };
+  const portsMatter =
+    !ALL_PROTOCOLS.has(settled.protocol) && !NON_PORT_PROTOCOLS.has(settled.protocol);
+  if (portsMatter && (settled.fromPort === undefined || settled.toPort === undefined)) {
+    into.unreadable.push({ source: settled.source, attribute: settled.attribute });
+    return;
+  }
+  into.rules.push(settled);
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -115,21 +149,38 @@ function inlineRules(resource: Resource, attribute: string): IngressScan {
       unreadable.push({ source: resource.address, attribute: cited });
       return;
     }
-    rules.push({
-      source: resource.address,
-      attribute: cited,
-      fromPort: asPort(fields.from_port),
-      toPort: asPort(fields.to_port),
-      protocol: asProtocol(fields.protocol),
-      cidrs: [...asCidrList(fields.cidr_blocks), ...asCidrList(fields.ipv6_cidr_blocks)],
-    });
+    classify(
+      {
+        source: resource.address,
+        attribute: cited,
+        fromPort: asPort(fields.from_port),
+        toPort: asPort(fields.to_port),
+        protocol: asProtocol(fields.protocol),
+        cidrs: [...asCidrList(fields.cidr_blocks), ...asCidrList(fields.ipv6_cidr_blocks)],
+      },
+      { rules, unreadable },
+    );
   });
 
   return { rules, unreadable };
 }
 
-function standaloneRule(resource: Resource): IngressScan {
-  for (const attribute of ["from_port", "to_port", "cidr_blocks", "protocol"]) {
+/**
+ * Builds the one rule a standalone resource declares.
+ *
+ * Every attribute the verdict reads must be guarded for unknown-ness —
+ * including both CIDR families. Missing one produces a Pass whose evidence is
+ * an empty CIDR list, which is a claim of compliance derived from a value the
+ * input never supplied.
+ */
+function singleRule(
+  resource: Resource,
+  guarded: readonly string[],
+  build: (read: (name: string) => unknown) => Omit<IngressRule, "protocol"> & {
+    readonly protocol: string | undefined;
+  },
+): IngressScan {
+  for (const attribute of guarded) {
     if (isUnknown(resource, attribute)) {
       return { rules: [], unreadable: [{ source: resource.address, attribute }] };
     }
@@ -138,44 +189,40 @@ function standaloneRule(resource: Resource): IngressScan {
     const value = readAttribute(resource, name);
     return value.kind === "value" ? value.value : undefined;
   };
-  return {
-    rules: [
-      {
-        source: resource.address,
-        attribute: "cidr_blocks",
-        fromPort: asPort(read("from_port")),
-        toPort: asPort(read("to_port")),
-        protocol: asProtocol(read("protocol")),
-        cidrs: [...asCidrList(read("cidr_blocks")), ...asCidrList(read("ipv6_cidr_blocks"))],
-      },
-    ],
-    unreadable: [],
-  };
+  const rules: IngressRule[] = [];
+  const unreadable: UnreadableRule[] = [];
+  classify(build(read), { rules, unreadable });
+  return { rules, unreadable };
+}
+
+function standaloneRule(resource: Resource): IngressScan {
+  return singleRule(
+    resource,
+    ["from_port", "to_port", "cidr_blocks", "ipv6_cidr_blocks", "protocol"],
+    (read) => ({
+      source: resource.address,
+      attribute: "cidr_blocks",
+      fromPort: asPort(read("from_port")),
+      toPort: asPort(read("to_port")),
+      protocol: asProtocol(read("protocol")),
+      cidrs: [...asCidrList(read("cidr_blocks")), ...asCidrList(read("ipv6_cidr_blocks"))],
+    }),
+  );
 }
 
 function vpcIngressRule(resource: Resource): IngressScan {
-  for (const attribute of ["from_port", "to_port", "cidr_ipv4", "cidr_ipv6", "ip_protocol"]) {
-    if (isUnknown(resource, attribute)) {
-      return { rules: [], unreadable: [{ source: resource.address, attribute }] };
-    }
-  }
-  const read = (name: string): unknown => {
-    const value = readAttribute(resource, name);
-    return value.kind === "value" ? value.value : undefined;
-  };
-  return {
-    rules: [
-      {
-        source: resource.address,
-        attribute: "cidr_ipv4",
-        fromPort: asPort(read("from_port")),
-        toPort: asPort(read("to_port")),
-        protocol: asProtocol(read("ip_protocol")),
-        cidrs: [...asCidrList(read("cidr_ipv4")), ...asCidrList(read("cidr_ipv6"))],
-      },
-    ],
-    unreadable: [],
-  };
+  return singleRule(
+    resource,
+    ["from_port", "to_port", "cidr_ipv4", "cidr_ipv6", "ip_protocol"],
+    (read) => ({
+      source: resource.address,
+      attribute: "cidr_ipv4",
+      fromPort: asPort(read("from_port")),
+      toPort: asPort(read("to_port")),
+      protocol: asProtocol(read("ip_protocol")),
+      cidrs: [...asCidrList(read("cidr_ipv4")), ...asCidrList(read("cidr_ipv6"))],
+    }),
+  );
 }
 
 /** Every ingress rule in the model, from all three declaration styles. */
@@ -196,10 +243,19 @@ export function collectIngressRules(model: ResourceModel): IngressScan {
   }
   for (const rule of resourcesOfType(model, "aws_security_group_rule")) {
     // The same resource type declares egress too, and an egress rule to the
-    // world is ordinary.
+    // world is ordinary. But only an explicit "egress" is safe to drop: an
+    // unknown or unrecognised type means we do not know whether we are looking
+    // at an ingress rule, and silently skipping it would let a world-open :22
+    // rule pass unexamined.
     const type = readAttribute(rule, "type");
-    if (type.kind === "value" && type.value === "ingress") {
+    const direction = type.kind === "value" ? type.value : undefined;
+    if (direction === "egress") {
+      continue;
+    }
+    if (direction === "ingress") {
       absorb(standaloneRule(rule));
+    } else {
+      unreadable.push({ source: rule.address, attribute: "type" });
     }
   }
   for (const rule of resourcesOfType(model, "aws_vpc_security_group_ingress_rule")) {

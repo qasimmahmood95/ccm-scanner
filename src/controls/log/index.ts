@@ -48,12 +48,14 @@ interface BooleanRequirement {
 
 function evaluateBooleans(trail: Resource, requirements: readonly BooleanRequirement[]): Finding {
   const evidence: Evidence[] = [];
+  const unknown: string[] = [];
   let unmet = 0;
 
   for (const requirement of requirements) {
     const read = readAttribute(trail, requirement.attribute);
     if (read.kind === "unknown") {
-      return notApplicable(unknownReason(trail, requirement.attribute));
+      unknown.push(requirement.attribute);
+      continue;
     }
     const value = read.kind === "value" ? read.value : null;
     if (value !== true) {
@@ -67,7 +69,22 @@ function evaluateBooleans(trail: Resource, requirements: readonly BooleanRequire
     });
   }
 
-  return unmet > 0 ? fail(evidence) : pass(evidence);
+  // Evidence of non-compliance is still evidence when a *different* attribute
+  // is unknown: a single-region trail is single-region whatever the global
+  // service events flag turns out to be. Returning not-applicable here would
+  // discard a finding we can support (hard constraint 5 defines Fail as having
+  // evidence of non-compliance, and we have it).
+  if (unmet > 0) {
+    return fail(evidence);
+  }
+  if (unknown.length > 0) {
+    return notApplicable(
+      `${trail.address}.${unknown.join(", .")} is not known until apply, and every other ` +
+        `requirement of this control is satisfied, so the verdict cannot be settled from ` +
+        `this input.`,
+    );
+  }
+  return pass(evidence);
 }
 
 /**
@@ -89,11 +106,6 @@ const cloudtrailMultiRegion: Check = {
       ]),
     ),
 };
-
-/** The bucket a trail delivers to, or undefined when it cannot be resolved. */
-function logBucketName(trail: Resource): string | undefined {
-  return asText(readAttribute(trail, "s3_bucket_name"));
-}
 
 /**
  * Combines the trail-side verdict with the bucket-side one.
@@ -130,14 +142,25 @@ function withLogBucket(
 
   const coverage = coverageOf(model, S3_BUCKET, correlation, name);
   switch (coverage.kind) {
+    // Both halves were checked, so the evidence must show both — a Pass citing
+    // only the trail would not tell an auditor the bucket was examined at all.
     case "covered":
-      return trailSide;
+      return pass([
+        ...trailSide.evidence,
+        {
+          resourceAddress: coverage.address,
+          attribute: "bucket",
+          observed: `holds the logs of ${trail.address} and satisfies: ${expected}`,
+          expected,
+        },
+      ]);
     case "uncovered":
       return fail([
+        ...trailSide.evidence,
         {
-          resourceAddress: trail.address,
-          attribute: "s3_bucket_name",
-          observed: `log bucket "${name}" is declared but does not satisfy: ${expected}`,
+          resourceAddress: coverage.address,
+          attribute: "bucket",
+          observed: `holds the logs of ${trail.address} but does not satisfy: ${expected}`,
           expected,
         },
       ]);
@@ -218,29 +241,33 @@ const cloudtrailAccountability: Check = {
       kind: "yes",
     }));
 
+    const EXPECTED = "delivery to CloudWatch Logs, or access logging on the log bucket";
+
     return trailFindings(model, "audit log accountability", (trail) => {
       const read = readAttribute(trail, "cloud_watch_logs_group_arn");
-      if (read.kind === "unknown") {
-        return notApplicable(unknownReason(trail, "cloud_watch_logs_group_arn"));
-      }
-      const group = asText(read);
+      const group = read.kind === "unknown" ? undefined : asText(read);
       if (group !== undefined) {
         return pass([
           {
             resourceAddress: trail.address,
             attribute: "cloud_watch_logs_group_arn",
             observed: group,
-            expected: "delivery to CloudWatch Logs, or access logging on the log bucket",
+            expected: EXPECTED,
           },
         ]);
       }
 
-      // No CloudWatch delivery, so the bucket's access logging is the only
-      // remaining signal.
-      const name = logBucketName(trail);
-      if (readAttribute(trail, "s3_bucket_name").kind === "unknown") {
+      // Either signal satisfies this control, so an unknown CloudWatch group —
+      // the ordinary shape when the ARN references a log group created in the
+      // same plan — must not stop us looking at the bucket. Access logging on
+      // its own is sufficient. What an unknown group does forbid is a *Fail*,
+      // since the group may well be set once applied.
+      const groupUnknown = read.kind === "unknown";
+      const bucketRead = readAttribute(trail, "s3_bucket_name");
+      if (bucketRead.kind === "unknown") {
         return notApplicable(unknownReason(trail, "s3_bucket_name"));
       }
+      const name = asText(bucketRead);
       if (name === undefined) {
         return notApplicable(
           `${trail.address} has no CloudWatch Logs group and names no s3_bucket_name, so ` +
@@ -249,26 +276,37 @@ const cloudtrailAccountability: Check = {
       }
 
       const coverage = coverageOf(model, S3_BUCKET, accessLogged, name);
-      const evidence: Evidence[] = [
-        {
-          resourceAddress: trail.address,
-          attribute: "cloud_watch_logs_group_arn",
-          observed: null,
-          expected: "delivery to CloudWatch Logs, or access logging on the log bucket",
-        },
-      ];
       switch (coverage.kind) {
         case "covered":
           return pass([
             {
-              resourceAddress: trail.address,
-              attribute: "s3_bucket_name",
-              observed: `log bucket "${name}" has server access logging`,
-              expected: "delivery to CloudWatch Logs, or access logging on the log bucket",
+              resourceAddress: coverage.address,
+              attribute: "bucket",
+              observed: `holds the logs of ${trail.address} and has server access logging`,
+              expected: EXPECTED,
             },
           ]);
         case "uncovered":
-          return fail(evidence);
+          return groupUnknown
+            ? notApplicable(
+                `${trail.address}.cloud_watch_logs_group_arn is not known until apply and its ` +
+                  `log bucket "${name}" has no server access logging, so neither signal can ` +
+                  `be settled from this input.`,
+              )
+            : fail([
+                {
+                  resourceAddress: trail.address,
+                  attribute: "cloud_watch_logs_group_arn",
+                  observed: null,
+                  expected: EXPECTED,
+                },
+                {
+                  resourceAddress: coverage.address,
+                  attribute: "bucket",
+                  observed: `holds the logs of ${trail.address} but has no server access logging`,
+                  expected: EXPECTED,
+                },
+              ]);
         case "undeclared":
           return notApplicable(
             `${trail.address} has no CloudWatch Logs group, and its log bucket "${name}" is ` +
@@ -307,7 +345,11 @@ const vpcFlowLogs: Check = {
     return correlatedFindings(
       model,
       VPC,
-      correlateBy(model, "aws_flow_log", "vpc_id", () => ({ kind: "yes" })),
+      // A flow log may legitimately target a subnet or an ENI, leaving vpc_id
+      // absent. That is not uncertainty about any VPC — reading it as such
+      // would let one compliant subnet flow log suppress the Fail for every
+      // uncovered VPC in the input.
+      correlateBy(model, "aws_flow_log", "vpc_id", () => ({ kind: "yes" }), "skip"),
       (covered, id) => ({
         attribute: "id",
         observed: covered ? "an aws_flow_log targets this VPC" : `no aws_flow_log targets "${id}"`,
