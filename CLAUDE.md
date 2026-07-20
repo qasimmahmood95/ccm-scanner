@@ -56,7 +56,9 @@ Cloud snapshot (JSON)   ─▶  (provider-       (checks emit         + human su
                             agnostic)         Verdicts)            + evidence pack
 ```
 
-- **Ingest** — adapters turn an input (`terraform show -json` / `plan -json`, an
+- **Ingest** — adapters turn an input (`terraform show -json`, of a saved plan
+  file or of state — note *not* `terraform plan -json`, which is a log stream —
+  an
   HCL directory, or a read-only cloud snapshot) into a normalized model. Adapters
   are the *only* code that knows about input formats.
 - **ResourceModel** — a provider-agnostic, typed graph of resources keyed by

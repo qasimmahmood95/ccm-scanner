@@ -10,6 +10,7 @@
           "type": "aws_security_group",
           "name": "web",
           "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
           "values": {
             "name": "web",
             "description": "HTTPS from the internet only",
@@ -28,7 +29,13 @@
                 "protocol": "-1",
                 "cidr_blocks": ["0.0.0.0/0"]
               }
-            ]
+            ],
+            "arn": null,
+            "id": null
+          },
+          "sensitive_values": {
+            "ingress": [{}],
+            "egress": [{}]
           }
         },
         {
@@ -47,11 +54,15 @@
           "type": "aws_kms_key",
           "name": "logs",
           "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
           "values": {
             "description": "CMK for log encryption",
             "enable_key_rotation": true,
-            "deletion_window_in_days": 30
-          }
+            "deletion_window_in_days": 30,
+            "arn": null,
+            "key_id": null
+          },
+          "sensitive_values": {}
         },
         {
           "address": "aws_iam_account_password_policy.strict",
@@ -59,6 +70,7 @@
           "type": "aws_iam_account_password_policy",
           "name": "strict",
           "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
           "values": {
             "minimum_password_length": 14,
             "require_uppercase_characters": true,
@@ -67,7 +79,8 @@
             "require_symbols": true,
             "password_reuse_prevention": 24,
             "max_password_age": 90
-          }
+          },
+          "sensitive_values": {}
         }
       ],
       "child_modules": [
@@ -75,14 +88,17 @@
           "address": "module.storage",
           "resources": [
             {
-              "address": "module.storage.aws_s3_bucket.logs",
+              "address": "module.storage.aws_s3_bucket.logs[\"primary\"]",
               "mode": "managed",
               "type": "aws_s3_bucket",
               "name": "logs",
+              "index": "primary",
               "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
               "values": {
                 "bucket": "example-compliant-logs"
-              }
+              },
+              "sensitive_values": {}
             },
             {
               "address": "module.storage.aws_s3_bucket_public_access_block.logs",
@@ -90,17 +106,83 @@
               "type": "aws_s3_bucket_public_access_block",
               "name": "logs",
               "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
               "values": {
                 "bucket": "example-compliant-logs",
                 "block_public_acls": true,
                 "block_public_policy": true,
                 "ignore_public_acls": true,
                 "restrict_public_buckets": true
-              }
+              },
+              "sensitive_values": {}
+            }
+          ],
+          "child_modules": [
+            {
+              "address": "module.storage.module.replica",
+              "resources": [
+                {
+                  "address": "module.storage.module.replica.aws_s3_bucket.archive",
+                  "mode": "managed",
+                  "type": "aws_s3_bucket",
+                  "name": "archive",
+                  "provider_name": "registry.terraform.io/hashicorp/aws",
+                  "schema_version": 0,
+                  "values": {
+                    "bucket": "example-compliant-archive"
+                  },
+                  "sensitive_values": {}
+                }
+              ]
             }
           ]
         }
       ]
     }
-  }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_kms_key.logs",
+      "mode": "managed",
+      "type": "aws_kms_key",
+      "name": "logs",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "description": "CMK for log encryption",
+          "enable_key_rotation": true,
+          "deletion_window_in_days": 30
+        },
+        "after_unknown": {
+          "arn": true,
+          "key_id": true,
+          "policy": true
+        },
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "aws_security_group.web",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "web"
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "ingress": [{}],
+          "egress": [{}]
+        },
+        "after_sensitive": {}
+      }
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 # ccm-scanner
 
-> Read-only compliance scanner: audit Terraform (HCL or `plan`/`show -json`) — or a
+> Read-only compliance scanner: audit Terraform (`terraform show -json`) — or a
 > read-only cloud snapshot — against a curated subset of the **CSA Cloud Controls
 > Matrix (CCM v4.0)**, and get an **audit-ready report** where every control is
 > **Pass**, **Fail**, or **Not-Applicable**, each verdict carrying its CCM control

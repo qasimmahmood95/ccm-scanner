@@ -67,7 +67,10 @@ validates against the schema; golden tests pass.
 **Goal:** the `ResourceModel` and the adapters that populate it.
 
 **Deliverables**
-- **Primary adapter:** `terraform show -json` / `terraform plan -json` ingester
+- **Primary adapter:** `terraform show -json` ingester — of a saved plan file
+  (`terraform plan -out=tfplan && terraform show -json tfplan`) or of state.
+  Not `terraform plan -json`, which emits newline-delimited log messages rather
+  than the plan representation.
   (reliable, provider-versioned JSON).
 - **Secondary/stretch:** HCL directory ingestion, with documented limitations
   (unresolved variables/expressions are surfaced, not guessed).

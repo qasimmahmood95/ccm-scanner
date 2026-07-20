@@ -10,6 +10,7 @@
           "type": "aws_security_group",
           "name": "admin",
           "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
           "values": {
             "name": "admin",
             "description": "SSH open to the world",
@@ -29,7 +30,8 @@
                 "cidr_blocks": ["0.0.0.0/0"]
               }
             ]
-          }
+          },
+          "sensitive_values": {}
         },
         {
           "address": "data.aws_caller_identity.current",
@@ -47,11 +49,13 @@
           "type": "aws_kms_key",
           "name": "unrotated",
           "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
           "values": {
             "description": "CMK without rotation",
             "enable_key_rotation": false,
             "deletion_window_in_days": 7
-          }
+          },
+          "sensitive_values": {}
         },
         {
           "address": "aws_iam_policy.admin",
@@ -59,10 +63,26 @@
           "type": "aws_iam_policy",
           "name": "admin",
           "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
           "values": {
             "name": "admin-everything",
             "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}"
-          }
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_ebs_volume.data",
+          "mode": "managed",
+          "type": "aws_ebs_volume",
+          "name": "data",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "availability_zone": "eu-west-2a",
+            "size": 20,
+            "encrypted": null
+          },
+          "sensitive_values": {}
         }
       ],
       "child_modules": [
@@ -75,9 +95,11 @@
               "type": "aws_s3_bucket",
               "name": "public",
               "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
               "values": {
                 "bucket": "example-non-compliant-public"
-              }
+              },
+              "sensitive_values": {}
             },
             {
               "address": "module.storage.aws_db_instance.main",
@@ -85,16 +107,67 @@
               "type": "aws_db_instance",
               "name": "main",
               "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 2,
               "values": {
                 "identifier": "example-db",
                 "engine": "postgres",
                 "storage_encrypted": false,
-                "publicly_accessible": true
+                "publicly_accessible": true,
+                "password": "example-not-a-real-password"
+              },
+              "sensitive_values": {
+                "password": true
               }
             }
           ]
         }
       ]
     }
-  }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_ebs_volume.data",
+      "mode": "managed",
+      "type": "aws_ebs_volume",
+      "name": "data",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "availability_zone": "eu-west-2a",
+          "size": 20
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "encrypted": true,
+          "kms_key_id": true
+        },
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "module.storage.aws_db_instance.main",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "storage_encrypted": false,
+          "publicly_accessible": true
+        },
+        "after_unknown": {
+          "arn": true,
+          "endpoint": true
+        },
+        "after_sensitive": {
+          "password": true
+        }
+      }
+    }
+  ]
 }

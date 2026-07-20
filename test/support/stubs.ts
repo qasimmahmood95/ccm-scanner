@@ -34,6 +34,8 @@ export const stubModel: ResourceModel = {
       type: "aws_s3_bucket",
       name: "archive",
       provider: "aws",
+      unknownAttributes: [],
+      sensitiveAttributes: [],
       attributes: {
         bucket: "example-archive",
         server_side_encryption: "aws:kms",
@@ -44,6 +46,8 @@ export const stubModel: ResourceModel = {
       type: "aws_s3_bucket",
       name: "logs",
       provider: "aws",
+      unknownAttributes: [],
+      sensitiveAttributes: [],
       attributes: {
         bucket: "example-logs",
         server_side_encryption: "aws:kms",
@@ -54,6 +58,8 @@ export const stubModel: ResourceModel = {
       type: "aws_security_group",
       name: "web",
       provider: "aws",
+      unknownAttributes: [],
+      sensitiveAttributes: [],
       attributes: {
         ingress: [{ from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] }],
       },
