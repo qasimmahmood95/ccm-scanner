@@ -194,6 +194,66 @@ describe("redactSensitive", () => {
     expect(redacted?.evidence[1]?.observed).toBe(REDACTED);
   });
 
+  // Sharing is not a cycle. A visited-set that conflates the two redacts the
+  // first reference and leaves the second in plaintext — a leak introduced by
+  // the guard meant to bound the walk.
+  it("redacts every reference to a shared subtree, not just the first", () => {
+    const shared = { password: "hunter2" };
+    const verdicts = [
+      verdict([
+        {
+          resourceAddress: "aws_db_instance.main",
+          attribute: "settings",
+          observed: { primary: shared, replica: shared },
+        },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect(redacted?.evidence[0]?.observed).toEqual({
+      primary: { password: REDACTED },
+      replica: { password: REDACTED },
+    });
+  });
+
+  it("redacts every reference to a shared array", () => {
+    const shared = [{ password: "hunter2" }];
+    const verdicts = [
+      verdict([
+        {
+          resourceAddress: "aws_db_instance.main",
+          attribute: "settings",
+          observed: { a: shared, b: shared },
+        },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect(redacted?.evidence[0]?.observed).toEqual({
+      a: [{ password: REDACTED }],
+      b: [{ password: REDACTED }],
+    });
+  });
+
+  it("still redacts through a cycle", () => {
+    const cyclic: Record<string, unknown> = { password: "hunter2" };
+    cyclic.self = cyclic;
+    const verdicts = [
+      verdict([
+        { resourceAddress: "aws_db_instance.main", attribute: "settings", observed: cyclic },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect((redacted?.evidence[0]?.observed as Record<string, unknown>).password).toBe(REDACTED);
+  });
+
   it("survives a cyclic observation rather than overflowing the stack", () => {
     const cyclic: Record<string, unknown> = { engine: "postgres" };
     cyclic.self = cyclic;

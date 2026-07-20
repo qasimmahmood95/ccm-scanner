@@ -53,50 +53,67 @@ const MAX_DEPTH = 20;
  * shape of a policy-statement observation, so stopping at the top level would
  * leave the most likely container unexamined.
  */
+interface Walk {
+  /** Nodes on the current path, for cycle detection. */
+  readonly active: WeakSet<object>;
+  /**
+   * Results already computed, so a node reachable by several paths is walked
+   * once. Sharing is not a cycle — treating it as one leaves the second
+   * reference unredacted, which is a leak rather than merely slow work.
+   */
+  readonly done: WeakMap<object, unknown>;
+}
+
 function redactKeys(
   value: unknown,
   sensitive: ReadonlySet<string>,
   depth = 0,
-  seen: WeakSet<object> = new WeakSet(),
+  walk: Walk = { active: new WeakSet(), done: new WeakMap() },
 ): unknown {
-  if (depth >= MAX_DEPTH) {
+  if (depth >= MAX_DEPTH || typeof value !== "object" || value === null) {
     return value;
   }
-  // The depth cap alone bounds recursion but not *work*: a cycle that branches
-  // revisits the same nodes exponentially. Evidence comes from JSON.parse
+  const memoised = walk.done.get(value);
+  if (memoised !== undefined) {
+    return memoised;
+  }
+  // The depth cap bounds recursion but not *work*: a branching cycle would
+  // revisit the same nodes exponentially. Evidence comes from JSON.parse
   // today, which cannot produce a cycle, but the M6 snapshot adapter is
   // another source and the cap should actually bound.
-  if (typeof value === "object" && value !== null) {
-    if (seen.has(value)) {
-      return value;
-    }
-    seen.add(value);
+  if (walk.active.has(value)) {
+    return value;
   }
+  walk.active.add(value);
+
+  let result: unknown = value;
   if (Array.isArray(value)) {
     let changed = false;
     const items = value.map((item) => {
-      const redacted = redactKeys(item, sensitive, depth + 1, seen);
+      const redacted = redactKeys(item, sensitive, depth + 1, walk);
       changed ||= redacted !== item;
       return redacted;
     });
-    return changed ? items : value;
-  }
-  if (!isPlainObject(value)) {
-    return value;
-  }
-  let changed = false;
-  const result: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (sensitive.has(key)) {
-      result[key] = REDACTED;
-      changed = true;
-      continue;
+    result = changed ? items : value;
+  } else if (isPlainObject(value)) {
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (sensitive.has(key)) {
+        next[key] = REDACTED;
+        changed = true;
+        continue;
+      }
+      const redacted = redactKeys(entry, sensitive, depth + 1, walk);
+      changed ||= redacted !== entry;
+      next[key] = redacted;
     }
-    const redacted = redactKeys(entry, sensitive, depth + 1, seen);
-    changed ||= redacted !== entry;
-    result[key] = redacted;
+    result = changed ? next : value;
   }
-  return changed ? result : value;
+
+  walk.active.delete(value);
+  walk.done.set(value, result);
+  return result;
 }
 
 function redactEvidence(evidence: Evidence, sensitive: ReadonlySet<string>): Evidence {
