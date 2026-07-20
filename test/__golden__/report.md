@@ -7,7 +7,7 @@
 | Tool | ccm-scanner 0.0.0-test |
 | CCM version | v4.0.13 |
 | Input | `memory:stub-model` |
-| Input digest | `sha256:2b5d03420fcf2f7f1de7072b0cd1bae69c4a3fa0853ee18fd4a6c2d7ad7bd8eb` |
+| Input digest | `sha256:295f597efbf86ae7926b270d385409c5cacde299a82c5b6fe86ff296c61eee85` |
 | Generated | 2026-01-01T00:00:00.000Z |
 
 ## Coverage by domain

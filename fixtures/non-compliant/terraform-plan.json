@@ -1,0 +1,174 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.8",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_security_group.admin",
+          "mode": "managed",
+          "type": "aws_security_group",
+          "name": "admin",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "name": "admin",
+            "description": "SSH open to the world",
+            "ingress": [
+              {
+                "from_port": 22,
+                "to_port": 22,
+                "protocol": "tcp",
+                "cidr_blocks": ["0.0.0.0/0"]
+              }
+            ],
+            "egress": [
+              {
+                "from_port": 0,
+                "to_port": 0,
+                "protocol": "-1",
+                "cidr_blocks": ["0.0.0.0/0"]
+              }
+            ]
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "data.aws_caller_identity.current",
+          "mode": "data",
+          "type": "aws_caller_identity",
+          "name": "current",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "values": {
+            "account_id": "123456789012"
+          }
+        },
+        {
+          "address": "aws_kms_key.unrotated",
+          "mode": "managed",
+          "type": "aws_kms_key",
+          "name": "unrotated",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "description": "CMK without rotation",
+            "enable_key_rotation": false,
+            "deletion_window_in_days": 7
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_iam_policy.admin",
+          "mode": "managed",
+          "type": "aws_iam_policy",
+          "name": "admin",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "name": "admin-everything",
+            "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_ebs_volume.data",
+          "mode": "managed",
+          "type": "aws_ebs_volume",
+          "name": "data",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 0,
+          "values": {
+            "availability_zone": "eu-west-2a",
+            "size": 20,
+            "encrypted": null
+          },
+          "sensitive_values": {}
+        }
+      ],
+      "child_modules": [
+        {
+          "address": "module.storage",
+          "resources": [
+            {
+              "address": "module.storage.aws_s3_bucket.public",
+              "mode": "managed",
+              "type": "aws_s3_bucket",
+              "name": "public",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 0,
+              "values": {
+                "bucket": "example-non-compliant-public"
+              },
+              "sensitive_values": {}
+            },
+            {
+              "address": "module.storage.aws_db_instance.main",
+              "mode": "managed",
+              "type": "aws_db_instance",
+              "name": "main",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "schema_version": 2,
+              "values": {
+                "identifier": "example-db",
+                "engine": "postgres",
+                "storage_encrypted": false,
+                "publicly_accessible": true,
+                "password": "example-not-a-real-password"
+              },
+              "sensitive_values": {
+                "password": true
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_ebs_volume.data",
+      "mode": "managed",
+      "type": "aws_ebs_volume",
+      "name": "data",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "availability_zone": "eu-west-2a",
+          "size": 20
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true,
+          "encrypted": true,
+          "kms_key_id": true,
+          "tags_all": { "environment": true }
+        },
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "module.storage.aws_db_instance.main",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "storage_encrypted": false,
+          "publicly_accessible": true
+        },
+        "after_unknown": {
+          "arn": true,
+          "endpoint": true
+        },
+        "after_sensitive": {
+          "password": true
+        }
+      }
+    }
+  ]
+}
