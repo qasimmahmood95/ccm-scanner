@@ -1,0 +1,106 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.8",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_security_group.web",
+          "mode": "managed",
+          "type": "aws_security_group",
+          "name": "web",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "values": {
+            "name": "web",
+            "description": "HTTPS from the internet only",
+            "ingress": [
+              {
+                "from_port": 443,
+                "to_port": 443,
+                "protocol": "tcp",
+                "cidr_blocks": ["0.0.0.0/0"]
+              }
+            ],
+            "egress": [
+              {
+                "from_port": 0,
+                "to_port": 0,
+                "protocol": "-1",
+                "cidr_blocks": ["0.0.0.0/0"]
+              }
+            ]
+          }
+        },
+        {
+          "address": "data.aws_caller_identity.current",
+          "mode": "data",
+          "type": "aws_caller_identity",
+          "name": "current",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "values": {
+            "account_id": "123456789012"
+          }
+        },
+        {
+          "address": "aws_kms_key.logs",
+          "mode": "managed",
+          "type": "aws_kms_key",
+          "name": "logs",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "values": {
+            "description": "CMK for log encryption",
+            "enable_key_rotation": true,
+            "deletion_window_in_days": 30
+          }
+        },
+        {
+          "address": "aws_iam_account_password_policy.strict",
+          "mode": "managed",
+          "type": "aws_iam_account_password_policy",
+          "name": "strict",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "values": {
+            "minimum_password_length": 14,
+            "require_uppercase_characters": true,
+            "require_lowercase_characters": true,
+            "require_numbers": true,
+            "require_symbols": true,
+            "password_reuse_prevention": 24,
+            "max_password_age": 90
+          }
+        }
+      ],
+      "child_modules": [
+        {
+          "address": "module.storage",
+          "resources": [
+            {
+              "address": "module.storage.aws_s3_bucket.logs",
+              "mode": "managed",
+              "type": "aws_s3_bucket",
+              "name": "logs",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "values": {
+                "bucket": "example-compliant-logs"
+              }
+            },
+            {
+              "address": "module.storage.aws_s3_bucket_public_access_block.logs",
+              "mode": "managed",
+              "type": "aws_s3_bucket_public_access_block",
+              "name": "logs",
+              "provider_name": "registry.terraform.io/hashicorp/aws",
+              "values": {
+                "bucket": "example-compliant-logs",
+                "block_public_acls": true,
+                "block_public_policy": true,
+                "ignore_public_acls": true,
+                "restrict_public_buckets": true
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
