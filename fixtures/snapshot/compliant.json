@@ -1,0 +1,204 @@
+{
+  "ccmScannerSnapshot": "1",
+  "source": "aws:123456789012:eu-west-2",
+  "capturedAt": "2026-07-21T00:00:00Z",
+  "resources": [
+    {
+      "address": "aws_cloudtrail.main",
+      "type": "aws_cloudtrail",
+      "attributes": {
+        "name": "org-trail",
+        "s3_bucket_name": "example-compliant-logs",
+        "is_multi_region_trail": true,
+        "include_global_service_events": true,
+        "enable_log_file_validation": true,
+        "cloud_watch_logs_group_arn": "arn:aws:logs:eu-west-2:123456789012:log-group:cloudtrail:*"
+      }
+    },
+    {
+      "address": "aws_default_security_group.default",
+      "type": "aws_default_security_group",
+      "attributes": {
+        "vpc_id": "vpc-0a1b2c3d4e5f60718",
+        "ingress": [],
+        "egress": []
+      }
+    },
+    {
+      "address": "aws_flow_log.main",
+      "type": "aws_flow_log",
+      "attributes": {
+        "vpc_id": "vpc-0a1b2c3d4e5f60718",
+        "traffic_type": "ALL",
+        "log_destination_type": "cloud-watch-logs"
+      }
+    },
+    {
+      "address": "aws_iam_account_password_policy.strict",
+      "type": "aws_iam_account_password_policy",
+      "attributes": {
+        "minimum_password_length": 14,
+        "require_uppercase_characters": true,
+        "require_lowercase_characters": true,
+        "require_numbers": true,
+        "require_symbols": true,
+        "password_reuse_prevention": 24,
+        "max_password_age": 90
+      }
+    },
+    {
+      "address": "aws_iam_policy.read_only",
+      "type": "aws_iam_policy",
+      "attributes": {
+        "name": "read-only-logs",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\"],\"Resource\":\"arn:aws:s3:::example-compliant-logs/*\"}]}"
+      }
+    },
+    {
+      "address": "aws_iam_policy.require_mfa",
+      "type": "aws_iam_policy",
+      "attributes": {
+        "name": "require-mfa",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Action\":[\"iam:*\"],\"Resource\":\"*\",\"Condition\":{\"BoolIfExists\":{\"aws:MultiFactorAuthPresent\":\"false\"}}}]}"
+      }
+    },
+    {
+      "address": "aws_iam_role.app",
+      "type": "aws_iam_role",
+      "attributes": {
+        "name": "app",
+        "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
+      }
+    },
+    {
+      "address": "aws_kms_key.logs",
+      "type": "aws_kms_key",
+      "attributes": {
+        "description": "CMK for log encryption",
+        "enable_key_rotation": true,
+        "deletion_window_in_days": 30,
+        "customer_master_key_spec": "SYMMETRIC_DEFAULT",
+        "arn": "arn:aws:kms:eu-west-2:123456789012:key/1a2b3c4d-0000-0000-0000-abcdefabcdef",
+        "key_id": "1a2b3c4d-0000-0000-0000-abcdefabcdef"
+      }
+    },
+    {
+      "address": "aws_security_group.web",
+      "type": "aws_security_group",
+      "attributes": {
+        "name": "web",
+        "description": "HTTPS from the internet only",
+        "ingress": [
+          {
+            "from_port": 443,
+            "to_port": 443,
+            "protocol": "tcp",
+            "cidr_blocks": ["0.0.0.0/0"]
+          }
+        ],
+        "egress": [
+          {
+            "from_port": 0,
+            "to_port": 0,
+            "protocol": "-1",
+            "cidr_blocks": ["0.0.0.0/0"]
+          }
+        ],
+        "arn": "arn:aws:ec2:eu-west-2:123456789012:security-group/sg-0a1b2c3d4e5f60718",
+        "id": "sg-0a1b2c3d4e5f60718"
+      }
+    },
+    {
+      "address": "aws_vpc.main",
+      "type": "aws_vpc",
+      "attributes": {
+        "id": "vpc-0a1b2c3d4e5f60718",
+        "cidr_block": "10.0.0.0/16"
+      }
+    },
+    {
+      "address": "module.storage.aws_s3_bucket.logs[\"primary\"]",
+      "type": "aws_s3_bucket",
+      "attributes": {
+        "bucket": "example-compliant-logs"
+      }
+    },
+    {
+      "address": "module.storage.aws_s3_bucket_policy.logs",
+      "type": "aws_s3_bucket_policy",
+      "attributes": {
+        "bucket": "example-compliant-logs",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":\"arn:aws:s3:::example-compliant-logs/*\",\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
+      }
+    },
+    {
+      "address": "module.storage.aws_s3_bucket_public_access_block.logs",
+      "type": "aws_s3_bucket_public_access_block",
+      "attributes": {
+        "bucket": "example-compliant-logs",
+        "block_public_acls": true,
+        "block_public_policy": true,
+        "ignore_public_acls": true,
+        "restrict_public_buckets": true
+      }
+    },
+    {
+      "address": "module.storage.aws_s3_bucket_server_side_encryption_configuration.logs",
+      "type": "aws_s3_bucket_server_side_encryption_configuration",
+      "attributes": {
+        "bucket": "example-compliant-logs",
+        "rule": [
+          {
+            "apply_server_side_encryption_by_default": [
+              {
+                "sse_algorithm": "aws:kms"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "address": "module.storage.module.replica.aws_s3_bucket.archive",
+      "type": "aws_s3_bucket",
+      "attributes": {
+        "bucket": "example-compliant-archive"
+      }
+    },
+    {
+      "address": "module.storage.module.replica.aws_s3_bucket_policy.archive",
+      "type": "aws_s3_bucket_policy",
+      "attributes": {
+        "bucket": "example-compliant-archive",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":\"arn:aws:s3:::example-compliant-archive/*\",\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
+      }
+    },
+    {
+      "address": "module.storage.module.replica.aws_s3_bucket_public_access_block.archive",
+      "type": "aws_s3_bucket_public_access_block",
+      "attributes": {
+        "bucket": "example-compliant-archive",
+        "block_public_acls": true,
+        "block_public_policy": true,
+        "ignore_public_acls": true,
+        "restrict_public_buckets": true
+      }
+    },
+    {
+      "address": "module.storage.module.replica.aws_s3_bucket_server_side_encryption_configuration.archive",
+      "type": "aws_s3_bucket_server_side_encryption_configuration",
+      "attributes": {
+        "bucket": "example-compliant-archive",
+        "rule": [
+          {
+            "apply_server_side_encryption_by_default": [
+              {
+                "sse_algorithm": "aws:kms"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

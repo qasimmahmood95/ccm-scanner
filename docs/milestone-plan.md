@@ -168,9 +168,12 @@ byte-reproducible for a fixed input+timestamp; CI drives the CLI.
 the homelab workflow.
 
 **Deliverables**
-- **Snapshot adapter:** consume a JSON snapshot (e.g. AWS Config export or
-  read-only `describe`/`list` output) into the same `ResourceModel`, so all
-  checks run unchanged.
+- **Snapshot adapter:** consume a JSON snapshot into the same `ResourceModel`,
+  so all checks run unchanged. The format is scanner-native rather than raw AWS
+  API output, and the tool issues no cloud calls — see **ADR-0004** for both
+  decisions and for the one honest divergence between the lanes (observed state
+  has no unknown-until-apply, so a snapshot can decide a control a plan must
+  decline).
 - The exact **least-privilege read-only** role/policy and commands used to
   produce a snapshot are documented; the tool needs no write credentials and
   (v1) issues no cloud calls itself — snapshot generation is an explicit,

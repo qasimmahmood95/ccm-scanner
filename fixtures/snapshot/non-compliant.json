@@ -1,0 +1,170 @@
+{
+  "ccmScannerSnapshot": "1",
+  "source": "aws:123456789012:eu-west-2",
+  "capturedAt": "2026-07-21T00:00:00Z",
+  "resources": [
+    {
+      "address": "aws_cloudtrail.regional",
+      "type": "aws_cloudtrail",
+      "attributes": {
+        "name": "regional-trail",
+        "s3_bucket_name": "example-non-compliant-public",
+        "is_multi_region_trail": false,
+        "include_global_service_events": false,
+        "enable_log_file_validation": false
+      }
+    },
+    {
+      "address": "aws_default_security_group.default",
+      "type": "aws_default_security_group",
+      "attributes": {
+        "vpc_id": "vpc-0badc0ffee1234567",
+        "ingress": [
+          {
+            "from_port": 0,
+            "to_port": 0,
+            "protocol": "-1",
+            "self": true,
+            "cidr_blocks": []
+          }
+        ],
+        "egress": []
+      }
+    },
+    {
+      "address": "aws_ebs_volume.data",
+      "type": "aws_ebs_volume",
+      "attributes": {
+        "availability_zone": "eu-west-2a",
+        "size": 20,
+        "encrypted": false,
+        "arn": "arn:aws:ec2:eu-west-2:123456789012:volume/vol-0badc0ffee1234567",
+        "id": "vol-0badc0ffee1234567"
+      }
+    },
+    {
+      "address": "aws_iam_account_password_policy.weak",
+      "type": "aws_iam_account_password_policy",
+      "attributes": {
+        "minimum_password_length": 8,
+        "require_uppercase_characters": false,
+        "require_lowercase_characters": true,
+        "require_numbers": true,
+        "require_symbols": false,
+        "password_reuse_prevention": 2,
+        "max_password_age": 0
+      }
+    },
+    {
+      "address": "aws_iam_policy.admin",
+      "type": "aws_iam_policy",
+      "attributes": {
+        "name": "admin-everything",
+        "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}"
+      }
+    },
+    {
+      "address": "aws_iam_role.public",
+      "type": "aws_iam_role",
+      "attributes": {
+        "name": "public",
+        "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":\"sts:AssumeRole\"}]}"
+      }
+    },
+    {
+      "address": "aws_kms_key.unrotated",
+      "type": "aws_kms_key",
+      "attributes": {
+        "description": "CMK without rotation",
+        "enable_key_rotation": false,
+        "deletion_window_in_days": 7,
+        "customer_master_key_spec": "SYMMETRIC_DEFAULT"
+      }
+    },
+    {
+      "address": "aws_lb_listener.legacy",
+      "type": "aws_lb_listener",
+      "attributes": {
+        "port": 443,
+        "protocol": "HTTPS",
+        "ssl_policy": "ELBSecurityPolicy-TLS-1-0-2015-04"
+      }
+    },
+    {
+      "address": "aws_security_group.admin",
+      "type": "aws_security_group",
+      "attributes": {
+        "name": "admin",
+        "description": "SSH open to the world",
+        "ingress": [
+          {
+            "from_port": 22,
+            "to_port": 22,
+            "protocol": "tcp",
+            "cidr_blocks": ["0.0.0.0/0"]
+          }
+        ],
+        "egress": [
+          {
+            "from_port": 0,
+            "to_port": 0,
+            "protocol": "-1",
+            "cidr_blocks": ["0.0.0.0/0"]
+          }
+        ]
+      }
+    },
+    {
+      "address": "aws_vpc.main",
+      "type": "aws_vpc",
+      "attributes": {
+        "id": "vpc-0badc0ffee1234567",
+        "cidr_block": "10.0.0.0/16"
+      }
+    },
+    {
+      "address": "module.storage.aws_db_instance.main",
+      "type": "aws_db_instance",
+      "attributes": {
+        "identifier": "example-db",
+        "engine": "postgres",
+        "storage_encrypted": false,
+        "publicly_accessible": true,
+        "password": "example-not-a-real-password",
+        "endpoint": "example-db.abc123.eu-west-2.rds.amazonaws.com:5432",
+        "arn": "arn:aws:rds:eu-west-2:123456789012:db:example-db"
+      },
+      "sensitiveAttributes": ["password"]
+    },
+    {
+      "address": "module.storage.aws_s3_bucket.public",
+      "type": "aws_s3_bucket",
+      "attributes": {
+        "bucket": "example-non-compliant-public"
+      }
+    },
+    {
+      "address": "module.storage.aws_s3_bucket.weak_algorithm",
+      "type": "aws_s3_bucket",
+      "attributes": {
+        "bucket": "example-non-compliant-weak"
+      }
+    },
+    {
+      "address": "module.storage.aws_s3_bucket_server_side_encryption_configuration.weak_algorithm",
+      "type": "aws_s3_bucket_server_side_encryption_configuration",
+      "attributes": {
+        "bucket": "example-non-compliant-weak",
+        "rule": [
+          {
+            "apply_server_side_encryption_by_default": [
+              {
+                "sse_algorithm": "AES128"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

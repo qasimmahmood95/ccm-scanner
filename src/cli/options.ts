@@ -6,6 +6,7 @@
  * mistyped selector must never quietly narrow a scan — a report that silently
  * assessed three controls instead of thirteen still says "PASS".
  */
+import { INPUT_FORMATS, type InputFormat } from "../ingest/index.js";
 import { CCM_DOMAINS, isCcmDomain, type CcmDomain } from "../model/ccm.js";
 
 /** Thrown for bad input from the user, as distinct from a bug in the scanner. */
@@ -34,6 +35,25 @@ export interface ScanOptions {
   readonly failOn: FailOn;
   /** Directory for the evidence pack. Absent means write to stdout. */
   readonly out: string | undefined;
+  /** Absent means detect it from the document. */
+  readonly inputFormat: InputFormat | undefined;
+}
+
+/**
+ * An explicit override for the format sniff.
+ *
+ * Detection handles both shipped formats, so this exists for the case where a
+ * document is ambiguous or the sniff is wrong — not as something a user should
+ * normally have to think about.
+ */
+export function parseInputFormat(value: string): InputFormat {
+  const match = INPUT_FORMATS.find((format) => format === value);
+  if (match === undefined) {
+    throw new UsageError(
+      `--input-format must be one of ${INPUT_FORMATS.join(", ")} (got "${value}").`,
+    );
+  }
+  return match;
 }
 
 const CCM_ID_PATTERN = /^[A-Za-z]{2,4}-\d{1,3}$/;

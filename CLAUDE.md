@@ -237,7 +237,8 @@ CI never touches a real cloud account.
 - No write credentials, ever. The cloud lane documents a least-privilege
   read-only role only.
 - gitleaks pre-commit + CI. Fixtures contain only fake identifiers.
-- Report `SECURITY.md` for the disclosure process (added in M6).
+- `SECURITY.md` documents the disclosure process, the read-only posture and the
+  documented limits of sensitive-value redaction.
 
 ## Pointers
 
