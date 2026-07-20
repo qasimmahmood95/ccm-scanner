@@ -35,7 +35,18 @@ const ALL_PROTOCOLS = new Set(["-1", "all"]);
  * The only protocols that actually carry ports. Terraform accepts a name or an
  * IANA number, so both forms are listed.
  */
-const PORT_PROTOCOLS = new Set(["tcp", "udp", "sctp", "6", "17", "132"]);
+const PORT_PROTOCOLS = new Set([
+  "tcp",
+  "udp",
+  "sctp",
+  "dccp",
+  "udplite",
+  "6",
+  "17",
+  "132",
+  "33",
+  "136",
+]);
 
 /**
  * Protocols whose `from_port`/`to_port` are not ports.
@@ -46,16 +57,29 @@ const PORT_PROTOCOLS = new Set(["tcp", "udp", "sctp", "6", "17", "132"]);
  * the port fields optional for them.
  */
 const PORTLESS_PROTOCOLS = new Set([
+  // ICMP, including the IANA alias the provider also accepts.
   "icmp",
   "icmpv6",
+  "ipv6-icmp",
   "1",
   "58",
+  // IPsec, tunnelling and routing protocols a VPN or transit setup declares.
   "esp",
   "ah",
   "gre",
+  "ipip",
+  "ipv6",
+  "ospf",
+  "vrrp",
+  "l2tp",
   "50",
   "51",
   "47",
+  "4",
+  "41",
+  "89",
+  "112",
+  "115",
 ]);
 
 /** One ingress rule, whatever declared it. */
@@ -117,8 +141,9 @@ function asCidrList(value: unknown): readonly string[] {
  * "all ports open to the world" failure out of a missing field.
  */
 function asProtocol(value: unknown): string | undefined {
-  if (typeof value === "string" && value !== "") {
-    return value.toLowerCase();
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    return trimmed === "" ? undefined : trimmed;
   }
   return typeof value === "number" ? String(value) : undefined;
 }
@@ -131,11 +156,19 @@ function asProtocol(value: unknown): string | undefined {
  * would be a Pass with nothing behind it.
  */
 function classify(
-  rule: Omit<IngressRule, "protocol"> & { readonly protocol: string | undefined },
+  rule: Omit<IngressRule, "protocol"> & {
+    readonly protocol: string | undefined;
+    /** What the declaring resource type calls it: `protocol` or `ip_protocol`. */
+    readonly protocolAttribute: string;
+  },
   into: { rules: IngressRule[]; unreadable: UnreadableRule[] },
 ): void {
   if (rule.protocol === undefined) {
-    into.unreadable.push({ source: rule.source, attribute: "protocol", cause: "unreadable" });
+    into.unreadable.push({
+      source: rule.source,
+      attribute: rule.protocolAttribute,
+      cause: "unreadable",
+    });
     return;
   }
   const settled: IngressRule = { ...rule, protocol: rule.protocol };
@@ -150,7 +183,7 @@ function classify(
   ) {
     into.unreadable.push({
       source: settled.source,
-      attribute: "protocol",
+      attribute: rule.protocolAttribute,
       cause: "unrecognised",
     });
     return;
@@ -203,6 +236,7 @@ function inlineRules(resource: Resource, attribute: string): IngressScan {
         fromPort: asPort(fields.from_port),
         toPort: asPort(fields.to_port),
         protocol: asProtocol(fields.protocol),
+        protocolAttribute: `${attribute}[${String(index)}].protocol`,
         cidrs: [...asCidrList(fields.cidr_blocks), ...asCidrList(fields.ipv6_cidr_blocks)],
       },
       { rules, unreadable },
@@ -225,6 +259,7 @@ function singleRule(
   guarded: readonly string[],
   build: (read: (name: string) => unknown) => Omit<IngressRule, "protocol"> & {
     readonly protocol: string | undefined;
+    readonly protocolAttribute: string;
   },
 ): IngressScan {
   for (const attribute of guarded) {
@@ -252,6 +287,7 @@ function standaloneRule(resource: Resource): IngressScan {
       fromPort: asPort(read("from_port")),
       toPort: asPort(read("to_port")),
       protocol: asProtocol(read("protocol")),
+      protocolAttribute: "protocol",
       cidrs: [...asCidrList(read("cidr_blocks")), ...asCidrList(read("ipv6_cidr_blocks"))],
     }),
   );
@@ -267,6 +303,7 @@ function vpcIngressRule(resource: Resource): IngressScan {
       fromPort: asPort(read("from_port")),
       toPort: asPort(read("to_port")),
       protocol: asProtocol(read("ip_protocol")),
+      protocolAttribute: "ip_protocol",
       cidrs: [...asCidrList(read("cidr_ipv4")), ...asCidrList(read("cidr_ipv6"))],
     }),
   );

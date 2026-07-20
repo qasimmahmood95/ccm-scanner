@@ -144,15 +144,30 @@ function withLogBucket(
   switch (coverage.kind) {
     // Both halves were checked, so the evidence must show both — a Pass citing
     // only the trail would not tell an auditor the bucket was examined at all.
+    //
+    // Each resource is described by what it actually is. A satellite does not
+    // "hold the logs" — the bucket does — and no single satellite evidences the
+    // whole requirement, so every one that contributed is cited rather than
+    // collapsing them into one address making a claim none of them supports.
     case "covered":
       return pass([
         ...trailSide.evidence,
-        {
-          resourceAddress: coverage.address,
+        ...(coverage.declared
+          ? [
+              {
+                resourceAddress: coverage.address,
+                attribute: "bucket",
+                observed: `holds the logs of ${trail.address}`,
+                expected,
+              },
+            ]
+          : []),
+        ...coverage.satellites.map((address) => ({
+          resourceAddress: address,
           attribute: "bucket",
-          observed: `holds the logs of ${trail.address} and satisfies: ${expected}`,
+          observed: `configures log bucket "${name}"`,
           expected,
-        },
+        })),
       ]);
     case "uncovered":
       return fail([
@@ -203,8 +218,17 @@ const cloudtrailLogValidation: Check = {
     const blocked = correlateBy(model, "aws_s3_bucket_public_access_block", "bucket", (block) =>
       qualifiesAsFullBlock(block),
     );
+    // The intersection keeps *both* halves' satellites, so the evidence can
+    // cite the resource that encrypts and the resource that blocks. Keeping
+    // only one would leave a Pass asserting a requirement half its evidence
+    // does not support.
     const protectedBuckets: Correlation = {
-      keys: new Map([...encrypted.keys].filter(([name]) => blocked.keys.has(name))),
+      keys: new Map(
+        [...encrypted.keys].flatMap(([name, addresses]) => {
+          const blocking = blocked.keys.get(name);
+          return blocking === undefined ? [] : [[name, [...addresses, ...blocking]] as const];
+        }),
+      ),
       unresolvable: [...encrypted.unresolvable, ...blocked.unresolvable],
     };
 
@@ -262,22 +286,26 @@ const cloudtrailAccountability: Check = {
       // same plan — must not stop us looking at the bucket. Access logging on
       // its own is sufficient. What an unknown group does forbid is a *Fail*,
       // since the group may well be set once applied.
-      // A value that is present but not a string is not an absent one either:
-      // failing on it would record `observed: null` for an input that plainly
-      // set something.
-      const groupUnknown = read.kind === "unknown" || read.kind === "value";
+      //
+      // Three ways to have no usable ARN, and they are not the same thing. An
+      // empty string is Terraform's idiom for "unset" and is as definite as an
+      // absent attribute, so it must still be able to Fail; only a value we
+      // genuinely cannot interpret blocks that.
+      const unreadableGroup = read.kind === "value" && typeof read.value !== "string";
+      const groupUnsettled = read.kind === "unknown" || unreadableGroup;
+
       const bucketRead = readAttribute(trail, "s3_bucket_name");
       if (bucketRead.kind === "unknown") {
         return notApplicable(unknownReason(trail, "s3_bucket_name"));
       }
-      // The two branches below describe the CloudWatch side, so they must
+      // The branches below describe the CloudWatch side, so they must
       // distinguish "not set" from "not yet known" — asserting absence of a
       // value the plan simply has not computed is the same conflation this
       // check was fixed to remove.
       const cloudWatch =
         read.kind === "unknown"
           ? "has a CloudWatch Logs group that is not known until apply"
-          : read.kind === "value"
+          : unreadableGroup
             ? "declares a cloud_watch_logs_group_arn that could not be read"
             : "has no CloudWatch Logs group";
 
@@ -292,16 +320,16 @@ const cloudtrailAccountability: Check = {
       const coverage = coverageOf(model, S3_BUCKET, accessLogged, name);
       switch (coverage.kind) {
         case "covered":
-          return pass([
-            {
-              resourceAddress: coverage.address,
+          return pass(
+            coverage.satellites.map((address) => ({
+              resourceAddress: address,
               attribute: "bucket",
-              observed: `holds the logs of ${trail.address} and has server access logging`,
+              observed: `configures server access logging on log bucket "${name}"`,
               expected: EXPECTED,
-            },
-          ]);
+            })),
+          );
         case "uncovered":
-          return groupUnknown
+          return groupUnsettled
             ? notApplicable(
                 `${trail.address} ${cloudWatch} and its log bucket "${name}" has no server ` +
                   `access logging, so neither signal can be settled from this input.`,

@@ -36,6 +36,18 @@ export function asNumber(read: AttributeRead): number | undefined {
   return read.kind === "value" && typeof read.value === "number" ? read.value : undefined;
 }
 
+/**
+ * A string value, or `undefined` when there is nothing usable to read.
+ *
+ * The empty string counts as nothing. Every caller reads an identifier or an
+ * ARN — a bucket name, a VPC id, a log-group ARN — and `""` is how Terraform
+ * serialises an unset optional string, both from `variable "x" { default = "" }`
+ * and from state. Returning it would let a check cite `observed: ""` as its
+ * evidence of compliance, which is a Pass with nothing behind it.
+ */
 export function asText(read: AttributeRead): string | undefined {
-  return read.kind === "value" && typeof read.value === "string" ? read.value : undefined;
+  if (read.kind !== "value" || typeof read.value !== "string" || read.value === "") {
+    return undefined;
+  }
+  return read.value;
 }

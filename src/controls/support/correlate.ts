@@ -37,14 +37,16 @@ export interface Unresolvable {
  * Subject keys that satisfy some control, plus the correlators we could not
  * resolve.
  *
- * Each key maps to the address of the satellite that qualified it. The subject
- * itself may be declared in a different configuration — an S3 bucket is
+ * Each key maps to the addresses of every satellite that qualified it. The
+ * subject itself may be declared in a different configuration — an S3 bucket is
  * identified by a globally unique name, so a satellite here can legitimately
- * configure a bucket created elsewhere — and then the satellite is the only
- * address available to cite as evidence.
+ * configure a bucket created elsewhere — and then the satellites are the only
+ * addresses available to cite as evidence. All of them are kept: a control
+ * satisfied by two resources must be able to cite both, or its evidence claims
+ * more than any single one of them shows.
  */
 export interface Correlation {
-  readonly keys: ReadonlyMap<string, string>;
+  readonly keys: ReadonlyMap<string, readonly string[]>;
   readonly unresolvable: readonly Unresolvable[];
 }
 
@@ -92,7 +94,7 @@ export function correlateBy(
   qualifies: (resource: Resource, key: string) => Qualification,
   absentKey: AbsentKey = "unresolvable",
 ): Correlation {
-  const keys = new Map<string, string>();
+  const keys = new Map<string, string[]>();
   const unresolvable: Unresolvable[] = [];
 
   for (const resource of resourcesOfType(model, type)) {
@@ -111,7 +113,7 @@ export function correlateBy(
     }
     const qualification = qualifies(resource, key);
     if (qualification.kind === "yes") {
-      keys.set(key, resource.address);
+      keys.set(key, [...(keys.get(key) ?? []), resource.address]);
     } else if (qualification.kind === "unresolvable") {
       // The subject resolved, so this uncertainty is confined to it.
       unresolvable.push({
@@ -185,7 +187,15 @@ export function correlatedFindings(
  */
 export type Coverage =
   /** `address` is the subject resource, so evidence can cite it rather than the caller. */
-  | { readonly kind: "covered"; readonly address: string }
+  | {
+      readonly kind: "covered";
+      /** The subject when it is declared here, else the first satellite. */
+      readonly address: string;
+      /** Every satellite that qualified this subject. */
+      readonly satellites: readonly string[];
+      /** False when the subject lives in another configuration. */
+      readonly declared: boolean;
+    }
   | { readonly kind: "uncovered"; readonly address: string }
   | { readonly kind: "undeclared" }
   | { readonly kind: "unresolvable"; readonly detail: string };
@@ -204,9 +214,14 @@ export function coverageOf(
   // configuring a subject declared elsewhere *is* the evidence the control
   // asks for. Testing declaration first would report "not declared here" while
   // holding the very evidence that contradicts it.
-  const satellite = correlation.keys.get(key);
-  if (satellite !== undefined) {
-    return { kind: "covered", address: declared?.address ?? satellite };
+  const satellites = correlation.keys.get(key);
+  if (satellites !== undefined && satellites.length > 0) {
+    return {
+      kind: "covered",
+      address: declared?.address ?? (satellites[0] as string),
+      satellites,
+      declared: declared !== undefined,
+    };
   }
   if (declared === undefined) {
     return { kind: "undeclared" };

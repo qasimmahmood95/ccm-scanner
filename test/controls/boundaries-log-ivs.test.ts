@@ -618,7 +618,9 @@ describe("regressions found by the M4 review gate", () => {
     );
     const finding = run("ivs/no-open-admin-ports", input)[0];
     expect(finding?.status).toBe("not_applicable");
-    expect(finding?.reason).toContain("aws_security_group.w.protocol");
+    expect(finding?.reason).toContain("aws_security_group.w.ingress[0].protocol");
+    // Absent is not unknown-until-apply, and the reason must not say it is.
+    expect(finding?.reason).toContain("could not be read");
   });
 
   it("declines a TCP rule whose ports are absent, naming a port attribute", () => {
@@ -804,6 +806,212 @@ describe("regressions found by the M4 review gate", () => {
       }),
     );
     expect(statusOf("ivs/s3-public-access-block", input)).toBe("fail");
+  });
+});
+
+describe("regressions found by the M4 third review round", () => {
+  // MB-1. `""` is how Terraform serialises an unset optional string, both from
+  // `variable "x" { default = "" }` and from state. Reading it as a value made
+  // LOG-04 report Pass with `observed: ""` — a Pass with nothing behind it.
+  it("fails a trail whose CloudWatch ARN is the empty string", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", cloud_watch_logs_group_arn: "" }),
+      bucket(),
+    );
+    expect(statusOf("log/cloudtrail-accountability", input)).toBe("fail");
+  });
+
+  // An empty string is a definite "unset", unlike a value we cannot interpret,
+  // so it must not be softened into not-applicable either.
+  it("treats an empty ARN as absent rather than unreadable", () => {
+    const finding = run(
+      "log/cloudtrail-accountability",
+      model(trail({ s3_bucket_name: "elsewhere", cloud_watch_logs_group_arn: "" })),
+    )[0];
+    expect(finding?.reason).toContain("has no CloudWatch Logs group");
+  });
+
+  // The same root cause reached every correlation key.
+  it("does not correlate a bucket whose name is the empty string", () => {
+    const input = model(
+      resource("aws_s3_bucket.a", "aws_s3_bucket", { bucket: "" }),
+      resource("aws_s3_bucket_public_access_block.a", "aws_s3_bucket_public_access_block", {
+        bucket: "",
+        block_public_acls: true,
+        block_public_policy: true,
+        ignore_public_acls: true,
+        restrict_public_buckets: true,
+      }),
+    );
+    expect(statusOf("ivs/s3-public-access-block", input)).toBe("not_applicable");
+  });
+
+  // SF-3 / M2. The bucket is cited in preference to its satellites when it is
+  // declared, and each resource is described as what it actually is: a
+  // satellite configures the bucket, it does not hold the logs.
+  it("cites the bucket and every satellite that evidenced LOG-02", () => {
+    const input = model(
+      trail({ s3_bucket_name: "logs", enable_log_file_validation: true }),
+      bucket(),
+      sse(),
+      fullBlock(),
+    );
+    const evidence = run("log/cloudtrail-log-validation", input)[0]?.evidence ?? [];
+    const cited = evidence.map((item) => item.resourceAddress);
+    expect(cited).toContain("aws_s3_bucket.logs");
+    expect(cited).toContain("aws_s3_bucket_server_side_encryption_configuration.logs");
+    expect(cited).toContain("aws_s3_bucket_public_access_block.logs");
+
+    const bucketEntry = evidence.find((item) => item.resourceAddress === "aws_s3_bucket.logs");
+    expect(String(bucketEntry?.observed)).toContain("holds the logs");
+    const satellite = evidence.find((item) =>
+      item.resourceAddress.startsWith("aws_s3_bucket_server_side"),
+    );
+    // The SSE configuration does not hold anything.
+    expect(String(satellite?.observed)).not.toContain("holds the logs");
+  });
+
+  // SF-2 / case D. A group adopting a VPC that is not declared here offsets
+  // nothing: the VPC that *is* declared still has an unmanaged default group.
+  it("does not let a group adopting an external VPC offset a declared one", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: null }, ["id"]),
+      resource("aws_default_security_group.d", "aws_default_security_group", {
+        vpc_id: "vpc-somewhere-else",
+        ingress: [],
+        egress: [],
+      }),
+    );
+    expect(statusesOf("ivs/default-sg-locked-down", input)).toEqual(["pass", "not_applicable"]);
+  });
+
+  // SF-1 / M14. The reason must name the side that actually failed to resolve,
+  // and must not claim "not known until apply" of ids that are merely absent.
+  it("says which side could not be resolved", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: "vpc-a" }),
+      resource("aws_vpc.b", "aws_vpc", { id: "vpc-b" }),
+      resource("aws_default_security_group.d", "aws_default_security_group", {
+        vpc_id: 42,
+        ingress: [],
+        egress: [],
+      }),
+    );
+    const finding = run("ivs/default-sg-locked-down", input).find(
+      (item) => item.status === "not_applicable",
+    );
+    expect(finding?.reason).toContain("could not be read");
+    expect(finding?.reason).not.toContain("not known until apply");
+  });
+
+  // M22. The counting reason is the whole content of that verdict.
+  it("explains the count when ids cannot be matched", () => {
+    const input = model(
+      resource("aws_vpc.a", "aws_vpc", { id: null }, ["id"]),
+      resource("aws_vpc.b", "aws_vpc", { id: null }, ["id"]),
+      resource(
+        "aws_default_security_group.d",
+        "aws_default_security_group",
+        { vpc_id: null, ingress: [], egress: [] },
+        ["vpc_id"],
+      ),
+    );
+    const finding = run("ivs/default-sg-locked-down", input).find(
+      (item) => item.status === "not_applicable",
+    );
+    expect(finding?.reason).toContain("2 VPC(s)");
+    expect(finding?.reason).toContain("not known until apply");
+  });
+
+  // M18. LOG-07's not-applicable wording is the only thing distinguishing
+  // "nothing is unmet but something is unknown" from an unexamined control.
+  it("says nothing else is non-compliant when a trail flag is unknown", () => {
+    const finding = run(
+      "log/cloudtrail-multi-region",
+      model(
+        trail({ is_multi_region_trail: true, include_global_service_events: null }, [
+          "include_global_service_events",
+        ]),
+      ),
+    )[0];
+    expect(finding?.reason).toContain("aws_cloudtrail.main.include_global_service_events");
+    expect(finding?.reason).toContain("Nothing else read from this trail is non-compliant");
+  });
+
+  // M21. The allowlist is matched lowercase, so casing must be normalised or
+  // every capitalised protocol would be declined as unrecognised.
+  for (const protocol of ["TCP", "Tcp"]) {
+    it(`reads protocol "${protocol}" case-insensitively`, () => {
+      const input = model(
+        resource("aws_security_group.w", "aws_security_group", {
+          ingress: [{ protocol, from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] }],
+        }),
+      );
+      expect(statusOf("ivs/no-open-admin-ports", input)).toBe("fail");
+    });
+  }
+
+  it("trims a padded protocol", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: " tcp ", from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("fail");
+  });
+
+  // FU-1. The newer resource type calls it `ip_protocol`; naming `protocol`
+  // would point an auditor at an attribute that does not exist on it.
+  it("names ip_protocol on the resource type that uses that name", () => {
+    const input = model(
+      resource("aws_vpc_security_group_ingress_rule.in", "aws_vpc_security_group_ingress_rule", {
+        ip_protocol: "tpc",
+        from_port: 22,
+        to_port: 22,
+        cidr_ipv4: "0.0.0.0/0",
+      }),
+    );
+    const finding = run("ivs/no-open-admin-ports", input)[0];
+    expect(finding?.reason).toContain("ip_protocol");
+    expect(finding?.reason).not.toContain(".protocol");
+  });
+
+  // FU-2. Portless protocols a VPN or transit setup declares must not become
+  // noise, and none of them can reach a TCP port anyway.
+  for (const protocol of ["ipv6-icmp", "ospf", "4", "41"]) {
+    it(`accepts portless protocol "${protocol}" without ports`, () => {
+      const input = model(
+        resource("aws_security_group.w", "aws_security_group", {
+          ingress: [{ protocol, cidr_blocks: ["0.0.0.0/0"] }],
+        }),
+      );
+      expect(statusOf("ivs/no-open-admin-ports", input)).toBe("pass");
+    });
+  }
+
+  it("fails world-open UDP-Lite on a sensitive port", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [{ protocol: "136", from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] }],
+      }),
+    );
+    expect(statusOf("ivs/no-open-admin-ports", input)).toBe("fail");
+  });
+
+  // An unrecognised rule must not suppress a real finding beside it.
+  it("still reports a real failure alongside an unrecognised rule", () => {
+    const input = model(
+      resource("aws_security_group.w", "aws_security_group", {
+        ingress: [
+          { protocol: "tpc", from_port: 80, to_port: 80, cidr_blocks: ["0.0.0.0/0"] },
+          { protocol: "tcp", from_port: 22, to_port: 22, cidr_blocks: ["0.0.0.0/0"] },
+        ],
+      }),
+    );
+    expect([...statusesOf("ivs/no-open-admin-ports", input)].sort()).toEqual([
+      "fail",
+      "not_applicable",
+    ]);
   });
 });
 

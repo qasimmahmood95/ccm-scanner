@@ -240,14 +240,22 @@ const defaultSgLockedDown: Check = {
     // evidenced; naming a specific VPC there would not be. Reporting a VPC as
     // unevidenceable while the group beside it just passed would contradict
     // the finding we already made.
-    const identified = vpcs.map((vpc) => ({ vpc, id: asText(readAttribute(vpc, "id")) }));
-    const groupVpcIds = groups.map((group) => asText(readAttribute(group, "vpc_id")));
+    const identified = vpcs.map((vpc) => ({
+      vpc,
+      id: asText(readAttribute(vpc, "id")),
+      unknownId: readAttribute(vpc, "id").kind === "unknown",
+    }));
+    const adoptions = groups.map((group) => ({
+      group,
+      vpcId: asText(readAttribute(group, "vpc_id")),
+      unknownVpcId: readAttribute(group, "vpc_id").kind === "unknown",
+    }));
     const allResolvable =
       identified.every((entry) => entry.id !== undefined) &&
-      groupVpcIds.every((id) => id !== undefined);
+      adoptions.every((entry) => entry.vpcId !== undefined);
 
     if (allResolvable) {
-      const adopted = new Set(groupVpcIds);
+      const adopted = new Set(adoptions.map((entry) => entry.vpcId));
       for (const { vpc, id } of identified) {
         if (id !== undefined && adopted.has(id)) {
           continue;
@@ -260,14 +268,33 @@ const defaultSgLockedDown: Check = {
           ),
         );
       }
-    } else if (vpcs.length > groups.length) {
+      return findings;
+    }
+
+    // Ids could not all be resolved, so VPCs cannot be matched to the groups
+    // that adopt them and no individual VPC can be named. Counting still
+    // evidences something: a group whose vpc_id resolves to an id no declared
+    // VPC carries adopts a VPC from somewhere else and offsets nothing here.
+    const declaredIds = new Set(identified.flatMap((entry) => (entry.id ? [entry.id] : [])));
+    const offsetting = adoptions.filter(
+      (entry) => entry.vpcId === undefined || declaredIds.has(entry.vpcId),
+    ).length;
+
+    if (vpcs.length > offsetting) {
+      // Name the cause honestly: unknown-until-apply and simply-absent are not
+      // the same thing, and the reason must not assert the wrong one.
+      const unknownSide = identified.some((entry) => entry.unknownId)
+        ? "their ids are not known until apply"
+        : adoptions.some((entry) => entry.unknownVpcId)
+          ? `a ${DEFAULT_SG_TYPE}'s vpc_id is not known until apply`
+          : "the ids could not be read";
       findings.push(
         notApplicable(
-          `This input declares ${String(vpcs.length)} VPCs but only ` +
-            `${String(groups.length)} ${DEFAULT_SG_TYPE}, so at least ` +
-            `${String(vpcs.length - groups.length)} default security group(s) keep the rules ` +
-            `AWS created them with. Which VPCs cannot be said: the ids are not known until ` +
-            `apply, so they cannot be matched to the groups that adopt them.`,
+          `This input declares ${String(vpcs.length)} VPC(s) but only ${String(offsetting)} ` +
+            `${DEFAULT_SG_TYPE} that could adopt one, so at least ` +
+            `${String(vpcs.length - offsetting)} default security group(s) keep the rules AWS ` +
+            `created them with. Which VPCs cannot be said: ${unknownSide}, so they cannot be ` +
+            `matched to the groups that adopt them.`,
         ),
       );
     }
