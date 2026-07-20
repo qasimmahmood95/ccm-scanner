@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { ScanOptions } from "../../src/cli/options.js";
@@ -186,5 +187,73 @@ describe("input warnings", () => {
       generatedAt: AT,
     });
     expect(result.exitCode).toBe(0);
+  });
+});
+
+describe("pipeline wiring", () => {
+  // Redaction is tested directly in test/report/redact.test.ts; this pins that
+  // the pipeline actually calls it, which is the part that matters for a
+  // control whose purpose is "no renderer can emit a sensitive value".
+  it("redacts sensitive values before rendering", () => {
+    const raw = JSON.stringify({
+      format_version: "1.2",
+      values: {
+        root_module: {
+          resources: [
+            {
+              address: "aws_db_instance.main",
+              mode: "managed",
+              type: "aws_db_instance",
+              name: "main",
+              provider_name: "registry.terraform.io/hashicorp/aws",
+              values: { storage_encrypted: false, password: "hunter2-not-real" },
+              sensitive_values: { storage_encrypted: true, password: true },
+            },
+          ],
+        },
+      },
+    });
+    const result = runScan({
+      raw,
+      source: "memory:sensitive",
+      options: options({ format: "both" }),
+      tool: TOOL,
+      generatedAt: AT,
+    });
+    for (const artifact of result.artifacts) {
+      expect(artifact.contents, artifact.name).not.toContain("hunter2-not-real");
+    }
+    expect(result.artifacts[0]?.contents).toContain("redacted");
+  });
+
+  it("digests the input bytes, not the source label", () => {
+    const raw = fixture("compliant/terraform-plan.json");
+    const asFoo = runScan({
+      raw,
+      source: "a.json",
+      options: options(),
+      tool: TOOL,
+      generatedAt: AT,
+    });
+    const asBar = runScan({
+      raw,
+      source: "b.json",
+      options: options(),
+      tool: TOOL,
+      generatedAt: AT,
+    });
+    expect(asFoo.report.metadata.input.digest).toBe(asBar.report.metadata.input.digest);
+    expect(asFoo.report.metadata.input.digest).toBe(createHash("sha256").update(raw).digest("hex"));
+  });
+
+  // Latent rather than reachable through parseControls, but it bypasses the
+  // guard registry.select() exists to provide: no verdicts, headline "pass",
+  // exit 0 — a vacuous clean bill of health.
+  it("refuses an empty selection rather than passing vacuously", () => {
+    expect(() =>
+      scan("compliant/terraform-plan.json", {
+        controls: { kind: "some", domains: [], ccmIds: [] },
+      }),
+    ).toThrow(/matched no registered checks/);
   });
 });

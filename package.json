@@ -16,7 +16,7 @@
     "audit"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "bin": {
     "ccm-scanner": "./dist/cli/index.js"

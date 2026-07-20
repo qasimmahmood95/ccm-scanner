@@ -116,6 +116,15 @@ export function parseFailOn(value: string): FailOn {
  * error rather than a guess.
  */
 export function validateDestination(format: OutputFormat, out: string | undefined): void {
+  // A blank --out is almost always an unset shell variable. Resolving it would
+  // silently drop the evidence pack into the current directory — and would slip
+  // past the `both` check below, defeating the one combination it exists for.
+  if (out !== undefined && out.trim() === "") {
+    throw new UsageError(
+      "--out was empty. Give a directory, or omit --out to write to stdout. " +
+        "(An empty value is usually an unset shell variable.)",
+    );
+  }
   if (format === "both" && out === undefined) {
     throw new UsageError(
       "--format both writes two documents, so it needs --out <dir>. Use --format json " +

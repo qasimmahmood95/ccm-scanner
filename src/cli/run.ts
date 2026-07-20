@@ -64,6 +64,14 @@ function selectChecks(selection: ControlSelection): readonly ValidatedCheck[] {
       wanted.add(check.checkId);
     }
   }
+  // `select()` refuses a selector that matches nothing; this is the same guard
+  // for the union, which reaches `select()` only through its parts. A selection
+  // that resolved to no checks would otherwise produce a report with no
+  // verdicts, headline "pass" and exit code 0 — a vacuous clean bill of health.
+  if (wanted.size === 0) {
+    throw new UsageError("--controls matched no registered checks.");
+  }
+
   // Filtered from the registry's own ordering rather than from insertion order,
   // so the selection is deterministic however it was spelled.
   return registry.checks.filter((check) => wanted.has(check.checkId));

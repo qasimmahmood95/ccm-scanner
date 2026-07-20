@@ -123,6 +123,90 @@ describe("redactSensitive", () => {
     expect(redactSensitive(verdicts, model(resource("aws_db_instance.main", [])))).toBe(verdicts);
   });
 
+  // `[{ Principal: … }]` is the shape iam/no-wildcard-trust already emits, so
+  // stopping at the top level leaves the most likely container unexamined.
+  it("descends into an array of objects", () => {
+    const verdicts = [
+      verdict([
+        {
+          resourceAddress: "aws_db_instance.main",
+          attribute: "statements",
+          observed: [{ Effect: "Allow", password: "hunter2" }],
+        },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect(redacted?.evidence[0]?.observed).toEqual([{ Effect: "Allow", password: REDACTED }]);
+  });
+
+  it("descends into a nested object", () => {
+    const verdicts = [
+      verdict([
+        {
+          resourceAddress: "aws_db_instance.main",
+          attribute: "settings",
+          observed: { db: { engine: "postgres", password: "hunter2" } },
+        },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect(redacted?.evidence[0]?.observed).toEqual({
+      db: { engine: "postgres", password: REDACTED },
+    });
+  });
+
+  // The whole verdict is rebuilt only when something changed, so a verdict
+  // whose *second* entry is clean must not lose the first entry's redaction.
+  it("redacts one entry of multi-entry evidence without dropping the change", () => {
+    const verdicts = [
+      verdict([
+        { resourceAddress: "aws_db_instance.main", attribute: "password", observed: "hunter2" },
+        { resourceAddress: "aws_db_instance.main", attribute: "engine", observed: "postgres" },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect(redacted?.evidence[0]?.observed).toBe(REDACTED);
+    expect(redacted?.evidence[1]?.observed).toBe("postgres");
+  });
+
+  // Reversed order: the change is on the *last* entry, which a `changed =`
+  // rather than `changed ||=` would keep, so both orders are pinned.
+  it("redacts the last entry of multi-entry evidence", () => {
+    const verdicts = [
+      verdict([
+        { resourceAddress: "aws_db_instance.main", attribute: "engine", observed: "postgres" },
+        { resourceAddress: "aws_db_instance.main", attribute: "password", observed: "hunter2" },
+      ]),
+    ];
+    const [redacted] = redactSensitive(
+      verdicts,
+      model(resource("aws_db_instance.main", ["password"])),
+    );
+    expect(redacted?.evidence[1]?.observed).toBe(REDACTED);
+  });
+
+  it("survives a cyclic observation rather than overflowing the stack", () => {
+    const cyclic: Record<string, unknown> = { engine: "postgres" };
+    cyclic.self = cyclic;
+    const verdicts = [
+      verdict([
+        { resourceAddress: "aws_db_instance.main", attribute: "settings", observed: cyclic },
+      ]),
+    ];
+    expect(() =>
+      redactSensitive(verdicts, model(resource("aws_db_instance.main", ["password"]))),
+    ).not.toThrow();
+  });
+
   it("preserves the rest of the verdict", () => {
     const original = verdict([
       { resourceAddress: "aws_db_instance.main", attribute: "password", observed: "hunter2" },

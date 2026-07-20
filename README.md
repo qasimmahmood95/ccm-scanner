@@ -67,13 +67,17 @@ names the right command.
 ### Options
 
 ```bash
-ccm-scanner scan   --input <plan.json>                       # terraform show -json output
-  --controls <all | iam,log,cek,ivs | IAM-05,CEK-12>   # default: all
-  --format <json | md | both>               # default: md
-  --out <dir>                               # default: stdout
-  --fail-on <fail | none>                   # default: fail
-  --generated-at <iso>                      # fix the timestamp, for reproducible output
+ccm-scanner scan --input plan.json --controls all --format md --fail-on fail
 ```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--input` | _required_ | `terraform show -json` output to scan |
+| `--controls` | `all` | `all`, domains (`iam,log,cek,ivs`), or ids (`IAM-05,CEK-12`) |
+| `--format` | `md` | `json`, `md`, or `both` (`both` requires `--out`) |
+| `--out` | stdout | Directory for the evidence pack |
+| `--fail-on` | `fail` | `none` reports failures without a non-zero exit |
+| `--generated-at` | now | Fix the report timestamp, for reproducible output |
 
 `--controls` reads as a **union**: `--controls iam,CEK-12` scans the whole IAM
 domain *plus* CEK-12. A selector that matches nothing is a usage error rather

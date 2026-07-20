@@ -12,10 +12,17 @@
  * renderer cannot forget.
  *
  * Note the limits, because a security control that overstates itself is worse
- * than one that does not exist: this redacts an evidence entry that *cites* a
- * sensitive attribute, and sensitive keys of a plain-object `observed`. It
- * cannot find a secret a check has interpolated into a free-text string, so
- * checks must not do that.
+ * than one that does not exist. This redacts:
+ *
+ * - an evidence entry that *cites* a sensitive attribute, including a nested
+ *   path under one (`master[0].password` under a sensitive `master`);
+ * - any sensitive key found while walking an object- or array-valued
+ *   `observed`, to `MAX_DEPTH`.
+ *
+ * It does **not** redact a secret a check has interpolated into a free-text
+ * `observed`, `expected` or `reason` — nothing there is machine-identifiable —
+ * so checks must not build strings out of attribute values. Nor does it know
+ * about a secret the input never marked sensitive.
  */
 import type { ResourceModel } from "../model/resource.js";
 import type { Evidence, Verdict } from "../model/verdict.js";
@@ -32,8 +39,33 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Replaces the values of sensitive keys, leaving the shape visible. */
-function redactKeys(value: unknown, sensitive: ReadonlySet<string>): unknown {
+/**
+ * Bounds the walk. Evidence is shallow in practice; the cap only stops a
+ * pathological or cyclic structure turning redaction into a stack overflow.
+ */
+const MAX_DEPTH = 20;
+
+/**
+ * Replaces the values of sensitive keys anywhere in the structure, leaving the
+ * shape visible.
+ *
+ * Arrays are walked as well as objects: `[{ Principal: … }]` is the ordinary
+ * shape of a policy-statement observation, so stopping at the top level would
+ * leave the most likely container unexamined.
+ */
+function redactKeys(value: unknown, sensitive: ReadonlySet<string>, depth = 0): unknown {
+  if (depth >= MAX_DEPTH) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item) => {
+      const redacted = redactKeys(item, sensitive, depth + 1);
+      changed ||= redacted !== item;
+      return redacted;
+    });
+    return changed ? items : value;
+  }
   if (!isPlainObject(value)) {
     return value;
   }
@@ -43,9 +75,11 @@ function redactKeys(value: unknown, sensitive: ReadonlySet<string>): unknown {
     if (sensitive.has(key)) {
       result[key] = REDACTED;
       changed = true;
-    } else {
-      result[key] = entry;
+      continue;
     }
+    const redacted = redactKeys(entry, sensitive, depth + 1);
+    changed ||= redacted !== entry;
+    result[key] = redacted;
   }
   return changed ? result : value;
 }

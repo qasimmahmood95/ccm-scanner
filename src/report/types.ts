@@ -1,7 +1,13 @@
 import type { CcmDomain } from "../model/ccm.js";
 import type { Verdict } from "../model/verdict.js";
 
-/** Bumped when the report JSON shape changes incompatibly. */
+/**
+ * Bumped when the report JSON shape changes.
+ *
+ * Minor for an added field (a reader that ignores unknown keys is unaffected,
+ * though the published schema sets `additionalProperties: false`, so documents
+ * do not validate across versions); major for a removal or a retype.
+ */
 export const REPORT_SCHEMA_VERSION = "1.1.0";
 
 export interface ToolInfo {

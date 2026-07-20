@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
- * The executable entry point, and the only place in the scanner that performs
- * I/O.
+ * The executable entry point: the only place that reads the scanned input or
+ * writes the evidence pack.
  *
- * It reads the input document and writes the evidence pack. It never writes to
- * the input, never executes Terraform, and issues no network calls — the
- * read-only posture is a property of the code, not a promise in the README
- * (hard constraints 1 and 2).
+ * (`banner.ts` also reads the bundled package.json, for the tool's own version.
+ * Read-only, and not the scanned input.)
+ *
+ * Nothing here writes to the input, executes Terraform, or issues a network
+ * call — and nothing else under `src/` can, which makes the read-only posture a
+ * property of the code rather than a promise in the README (hard constraints 1
+ * and 2).
  */
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { formatBanner, readManifest } from "./banner.js";
 import {
@@ -113,7 +117,10 @@ export function main(argv: readonly string[]): number {
   const program = new Command()
     .name(manifest.name)
     .description("Read-only CCM v4.0 compliance scanner for Terraform")
-    .version(manifest.version)
+    // `-v` as well as `-V`: it printed the version through M4, and a CLI that
+    // stops answering a flag it used to answer is a regression whatever the
+    // convention says.
+    .version(manifest.version, "-v, --version")
     // Errors come back to us rather than calling process.exit, so every misuse
     // exits through one path with one shape.
     .exitOverride()
@@ -136,14 +143,16 @@ export function main(argv: readonly string[]): number {
   try {
     program.parse([...argv], { from: "user" });
   } catch (error) {
-    // commander throws for --help and --version too; neither is a failure.
+    // commander throws for --help and --version too, and neither is a failure.
+    // It has *already* written them to stdout by this point — only stderr is
+    // suppressed above — so printing anything here duplicates the output, and
+    // for `scan --help` appends the wrong (root) help document.
     const commanderCode = (error as { code?: string }).code;
-    if (commanderCode === "commander.helpDisplayed" || commanderCode === "commander.help") {
-      process.stdout.write(program.helpInformation());
-      return 0;
-    }
-    if (commanderCode === "commander.version") {
-      process.stdout.write(`${manifest.version}\n`);
+    if (
+      commanderCode === "commander.helpDisplayed" ||
+      commanderCode === "commander.help" ||
+      commanderCode === "commander.version"
+    ) {
       return 0;
     }
     if (error instanceof UsageError) {
@@ -159,11 +168,20 @@ export function main(argv: readonly string[]): number {
   return code;
 }
 
-const argv = process.argv.slice(2);
-if (argv.length === 0) {
-  // No arguments is not an error: say what this is and how to start.
-  process.stdout.write(formatBanner(readManifest(), argv));
-  process.exitCode = 0;
-} else {
-  process.exitCode = main(argv);
+/** Entry: a bare invocation explains the tool; anything else is parsed. */
+export function runCli(argv: readonly string[]): number {
+  if (argv.length === 0) {
+    // No arguments is not an error: say what this is and how to start.
+    process.stdout.write(formatBanner(readManifest()));
+    return 0;
+  }
+  return main(argv);
+}
+
+// Only when executed as a program. The tests import this module to drive
+// `main` over the stdout path, and importing it must not print a banner or set
+// an exit code.
+const invokedPath = process.argv[1];
+if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
+  process.exitCode = runCli(process.argv.slice(2));
 }

@@ -139,9 +139,9 @@ export const fixedMetadata: RunMetadata = {
 };
 
 /** The canonical report used by the golden-file tests and the golden generator. */
-export function buildStubReport(): Report {
+export function buildStubReport(warnings: readonly string[] = []): Report {
   const registry = createRegistry(stubChecks);
-  return buildReport(evaluate(registry.select(), stubModel), fixedMetadata);
+  return buildReport(evaluate(registry.select(), stubModel), fixedMetadata, warnings);
 }
 
 export const GOLDEN_DIR = new URL("../__golden__/", import.meta.url);
