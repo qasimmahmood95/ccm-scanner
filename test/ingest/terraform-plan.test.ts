@@ -87,7 +87,46 @@ describe("values that are not known until apply", () => {
     const volume = nonCompliant.model.resources.find(
       (resource) => resource.address === "aws_ebs_volume.data",
     );
-    expect(volume?.unknownAttributes).toEqual(["arn", "encrypted", "id", "kms_key_id"]);
+    expect(volume?.unknownAttributes).toEqual(["arn", "encrypted", "id", "kms_key_id", "tags_all"]);
+  });
+
+  // Terraform marks unknown-ness at the leaves, so the traversal has to recurse.
+  // Without a nested `true` in a fixture, deleting that recursion goes unnoticed.
+  it("finds a true nested below the top level", () => {
+    const volume = nonCompliant.model.resources.find(
+      (resource) => resource.address === "aws_ebs_volume.data",
+    );
+    expect(volume?.unknownAttributes).toContain("tags_all");
+
+    const raw = JSON.stringify({
+      planned_values: {
+        root_module: {
+          resources: [{ address: "a.b", mode: "managed", type: "a", name: "b", values: {} }],
+        },
+      },
+      resource_changes: [
+        {
+          address: "a.b",
+          change: { after_unknown: { ingress: [{ cidr_blocks: true }], name: false } },
+        },
+      ],
+    });
+    expect(ingestTerraformPlan(raw, "x").model.resources[0]?.unknownAttributes).toEqual([
+      "ingress",
+    ]);
+  });
+
+  it("resolves a nested attribute path to its top-level attribute", () => {
+    const volume = nonCompliant.model.resources.find(
+      (resource) => resource.address === "aws_ebs_volume.data",
+    );
+    if (volume === undefined) {
+      throw new Error("fixture should contain aws_ebs_volume.data");
+    }
+    // A check reading ingress[0].cidr_blocks is asking about `ingress`.
+    expect(isUnknown(volume, "tags_all[0].environment")).toBe(true);
+    expect(isUnknown(volume, "tags_all.environment")).toBe(true);
+    expect(isUnknown(volume, "size[0]")).toBe(false);
   });
 
   it("exposes them through isUnknown, so a check can report not-applicable", () => {
@@ -200,6 +239,59 @@ describe("terraform state (`show -json`) form", () => {
   });
 });
 
+// Losing the unknown markers silently is as bad as never reading them: a check
+// then mistakes "will be computed" for "not configured" and emits an
+// evidenced-looking verdict it has no basis for.
+describe("malformed resource_changes", () => {
+  function warningsFor(resourceChanges: unknown): readonly string[] {
+    const raw = JSON.stringify({
+      planned_values: {
+        root_module: {
+          resources: [{ address: "a.b", mode: "managed", type: "a", name: "b", values: {} }],
+        },
+      },
+      resource_changes: resourceChanges,
+    });
+    return ingestTerraformPlan(raw, "x").warnings;
+  }
+
+  it("warns when resource_changes is not an array", () => {
+    expect(warningsFor({ "a.b": {} }).join(" ")).toContain(
+      "unknown-until-apply values cannot be identified",
+    );
+  });
+
+  it("warns when an entry has no usable change", () => {
+    expect(warningsFor([{ address: "a.b", change: "nope" }]).join(" ")).toContain(
+      'entry for a.b has no usable "change"',
+    );
+  });
+
+  it("warns when after_unknown is a scalar true, which names no attributes", () => {
+    expect(warningsFor([{ address: "a.b", change: { after_unknown: true } }]).join(" ")).toContain(
+      "cannot be enumerated",
+    );
+  });
+
+  it("merges duplicate entries for one address rather than letting the last win", () => {
+    const raw = JSON.stringify({
+      planned_values: {
+        root_module: {
+          resources: [{ address: "a.b", mode: "managed", type: "a", name: "b", values: {} }],
+        },
+      },
+      resource_changes: [
+        { address: "a.b", change: { after_unknown: { encrypted: true } } },
+        { address: "a.b", change: { after_unknown: { kms_key_id: true } } },
+      ],
+    });
+    expect(ingestTerraformPlan(raw, "x").model.resources[0]?.unknownAttributes).toEqual([
+      "encrypted",
+      "kms_key_id",
+    ]);
+  });
+});
+
 describe("provider names", () => {
   function providerFor(providerName: unknown): string | undefined {
     const raw = JSON.stringify({
@@ -275,6 +367,36 @@ describe("malformed input", () => {
     const warnings = ingestTerraformPlan(raw, "x").warnings;
     expect(warnings).toContain("skipped root_module.child_modules[0], which was not an object");
     expect(warnings).toContain("skipped root_module.child_modules[1], which was not an object");
+  });
+
+  // Same class as the above, and the more dangerous shape: an entire subtree of
+  // resources disappears while the caller sees a complete-looking model.
+  it("warns when child_modules is present but not an array", () => {
+    const raw = JSON.stringify({
+      planned_values: {
+        root_module: {
+          resources: [
+            { address: "aws_kms_key.k", mode: "managed", type: "aws_kms_key", name: "k" },
+          ],
+          child_modules: { "module.prod": { resources: [] } },
+        },
+      },
+    });
+    const result = ingestTerraformPlan(raw, "x");
+    expect(result.warnings).toContain("skipped root_module.child_modules, which was not an array");
+    expect(result.model.resources).toHaveLength(1);
+  });
+
+  it("stops and warns rather than overflowing on pathological module nesting", () => {
+    let module: Record<string, unknown> = { resources: [] };
+    for (let i = 0; i < 500; i += 1) {
+      module = { resources: [], child_modules: [module] };
+    }
+    const raw = JSON.stringify({ planned_values: { root_module: module } });
+    const result = ingestTerraformPlan(raw, "x");
+    expect(result.warnings.some((warning) => warning.includes("module nesting exceeded"))).toBe(
+      true,
+    );
   });
 
   it("warns when resources is present but not an array", () => {

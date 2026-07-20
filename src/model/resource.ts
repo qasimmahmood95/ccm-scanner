@@ -55,9 +55,14 @@ export function findResource(model: ResourceModel, address: string): Resource | 
 /**
  * True when the attribute's value is not knowable from this input, so a check
  * must report `not_applicable` rather than infer anything from its absence.
+ *
+ * Accepts a nested path as well as a bare name — a check reading
+ * `ingress[0].cidr_blocks` is asking about the `ingress` attribute, and
+ * Terraform marks unknown-ness at the top level.
  */
 export function isUnknown(resource: Resource, attribute: string): boolean {
-  return resource.unknownAttributes.includes(attribute);
+  const [topLevel] = attribute.split(/[.[]/, 1);
+  return resource.unknownAttributes.includes(topLevel ?? attribute);
 }
 
 /** An empty model — useful for tests and for inputs that declare no resources. */

@@ -21,6 +21,13 @@ export interface IngestResult {
   readonly warnings: readonly string[];
 }
 
+/**
+ * Terraform nests modules and attribute markers, but not deeply. A cap keeps a
+ * pathological document from overflowing the stack with a `RangeError` that
+ * would escape this adapter's own error type.
+ */
+const MAX_DEPTH = 100;
+
 interface WalkContext {
   readonly resources: Resource[];
   readonly warnings: string[];
@@ -39,15 +46,18 @@ function shortProvider(providerName: string | undefined): string {
 }
 
 /** True when any leaf in the subtree is `true`. */
-function containsTrue(value: unknown): boolean {
+function containsTrue(value: unknown, depth: number): boolean {
   if (value === true) {
     return true;
   }
+  if (depth >= MAX_DEPTH) {
+    return false;
+  }
   if (Array.isArray(value)) {
-    return value.some(containsTrue);
+    return value.some((entry) => containsTrue(entry, depth + 1));
   }
   if (isRecord(value)) {
-    return Object.values(value).some(containsTrue);
+    return Object.values(value).some((entry) => containsTrue(entry, depth + 1));
   }
   return false;
 }
@@ -63,8 +73,12 @@ function markedAttributes(marker: unknown): readonly string[] {
     return [];
   }
   return Object.keys(marker)
-    .filter((key) => containsTrue(marker[key]))
+    .filter((key) => containsTrue(marker[key], 0))
     .sort(compareStrings);
+}
+
+function mergeSorted(a: readonly string[], b: readonly string[]): readonly string[] {
+  return [...new Set([...a, ...b])].sort(compareStrings);
 }
 
 /**
@@ -73,27 +87,69 @@ function markedAttributes(marker: unknown): readonly string[] {
  * `planned_values` writes unknown values as `null` or omits them, so this map —
  * built from `resource_changes[].change.after_unknown` — is the only thing that
  * distinguishes "will be computed" from "not configured". Ingest is the only
- * layer that can see it.
+ * layer that can see it, so anything that stops us reading it is warned about
+ * rather than passed over: a check that mistakes unknown for absent will emit
+ * an evidenced-looking verdict it has no basis for.
  */
-function unknownByAddress(parsed: Record<string, unknown>): ReadonlyMap<string, readonly string[]> {
+function unknownByAddress(
+  parsed: Record<string, unknown>,
+  warnings: string[],
+): ReadonlyMap<string, readonly string[]> {
   const map = new Map<string, readonly string[]>();
+
+  if (parsed.resource_changes !== undefined && !Array.isArray(parsed.resource_changes)) {
+    warnings.push(
+      'skipped "resource_changes", which was not an array; unknown-until-apply values ' +
+        "cannot be identified",
+    );
+    return map;
+  }
+
   for (const entry of asArray(parsed.resource_changes)) {
     if (!isRecord(entry)) {
+      warnings.push('skipped a "resource_changes" entry that was not an object');
       continue;
     }
     const address = asString(entry.address);
-    if (address === undefined || !isRecord(entry.change)) {
+    if (address === undefined) {
+      warnings.push('skipped a "resource_changes" entry with no address');
       continue;
     }
-    const unknown = markedAttributes(entry.change.after_unknown);
+    if (!isRecord(entry.change)) {
+      warnings.push(`"resource_changes" entry for ${address} has no usable "change"`);
+      continue;
+    }
+
+    const afterUnknown = entry.change.after_unknown;
+    if (afterUnknown === true) {
+      warnings.push(
+        `every attribute of ${address} is unknown until apply, but they cannot be ` +
+          "enumerated from this input",
+      );
+      continue;
+    }
+    if (afterUnknown !== undefined && afterUnknown !== false && !isRecord(afterUnknown)) {
+      warnings.push(`"resource_changes" entry for ${address} has an unusable "after_unknown"`);
+      continue;
+    }
+
+    const unknown = markedAttributes(afterUnknown);
     if (unknown.length > 0) {
-      map.set(address, unknown);
+      // A resource can appear more than once (the replace/deposed shape), so
+      // merge rather than let the last entry win.
+      map.set(address, mergeSorted(map.get(address) ?? [], unknown));
     }
   }
   return map;
 }
 
-function walkModule(module: unknown, path: string, context: WalkContext): void {
+function walkModule(module: unknown, path: string, depth: number, context: WalkContext): void {
+  if (depth >= MAX_DEPTH) {
+    context.warnings.push(
+      `stopped at ${path}: module nesting exceeded ${String(MAX_DEPTH)} levels`,
+    );
+    return;
+  }
   if (!isRecord(module)) {
     context.warnings.push(`skipped ${path}, which was not an object`);
     return;
@@ -144,9 +200,16 @@ function walkModule(module: unknown, path: string, context: WalkContext): void {
     });
   }
 
-  const children = asArray(module.child_modules);
-  for (const [index, child] of children.entries()) {
-    walkModule(child, `${path}.child_modules[${String(index)}]`, context);
+  // Guarded for the same reason as `resources` above: a non-array here would
+  // silently discard every resource nested beneath it, and the caller would
+  // see a complete-looking model with an empty warning list.
+  if (module.child_modules !== undefined && !Array.isArray(module.child_modules)) {
+    context.warnings.push(`skipped ${path}.child_modules, which was not an array`);
+    return;
+  }
+
+  for (const [index, child] of asArray(module.child_modules).entries()) {
+    walkModule(child, `${path}.child_modules[${String(index)}]`, depth + 1, context);
   }
 }
 
@@ -208,10 +271,10 @@ export function ingestTerraformPlan(raw: string, source: string): IngestResult {
   const context: WalkContext = {
     resources: [],
     warnings,
-    unknownByAddress: unknownByAddress(parsed),
+    unknownByAddress: unknownByAddress(parsed, warnings),
     seenAddresses: new Set<string>(),
   };
-  walkModule(container.root_module, "root_module", context);
+  walkModule(container.root_module, "root_module", 0, context);
 
   if (context.resources.length === 0) {
     warnings.push("no managed resources found in the input");

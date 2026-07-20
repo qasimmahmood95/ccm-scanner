@@ -142,7 +142,8 @@
           "arn": true,
           "id": true,
           "encrypted": true,
-          "kms_key_id": true
+          "kms_key_id": true,
+          "tags_all": { "environment": true }
         },
         "after_sensitive": {}
       }
