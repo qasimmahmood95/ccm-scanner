@@ -32,6 +32,14 @@
       }
     },
     {
+      "address": "aws_default_security_group.unscoped",
+      "type": "aws_default_security_group",
+      "attributes": {
+        "ingress": [],
+        "egress": []
+      }
+    },
+    {
       "address": "aws_ebs_volume.data",
       "type": "aws_ebs_volume",
       "attributes": {
@@ -120,6 +128,22 @@
       "attributes": {
         "id": "vpc-0badc0ffee1234567",
         "cidr_block": "10.0.0.0/16"
+      }
+    },
+    {
+      "address": "aws_vpc.secondary",
+      "type": "aws_vpc",
+      "attributes": {
+        "id": "vpc-0badc0ffee7654321",
+        "cidr_block": "10.1.0.0/16"
+      }
+    },
+    {
+      "address": "aws_vpc.tertiary",
+      "type": "aws_vpc",
+      "attributes": {
+        "id": "vpc-0badc0ffeeabcdef0",
+        "cidr_block": "10.2.0.0/16"
       }
     },
     {

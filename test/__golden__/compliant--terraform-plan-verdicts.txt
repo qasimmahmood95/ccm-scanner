@@ -30,6 +30,12 @@ PASS  CEK-03  cek/tls-enforced
 
 PASS  CEK-04  cek/approved-algorithms
     title: Encryption Algorithm
+    - aws_s3_bucket_server_side_encryption_configuration.audit.rule[].apply_server_side_encryption_by_default.sse_algorithm
+      observed: ["aws:kms"]
+      expected: one of aws:kms, aws:kms:dsse, AES256
+
+PASS  CEK-04  cek/approved-algorithms
+    title: Encryption Algorithm
     - module.storage.aws_s3_bucket_server_side_encryption_configuration.logs.rule[].apply_server_side_encryption_by_default.sse_algorithm
       observed: ["aws:kms"]
       expected: one of aws:kms, aws:kms:dsse, AES256
@@ -146,6 +152,18 @@ NOT_APPLICABLE  IVS-08  ivs/na-documentation
 
 PASS  LOG-02  log/cloudtrail-log-validation
     title: Audit Logs Protection
+    - aws_cloudtrail.audit.enable_log_file_validation
+      observed: true
+      expected: true
+    - aws_s3_bucket_server_side_encryption_configuration.audit.bucket
+      observed: "configures log bucket \"example-compliant-audit\""
+      expected: the log bucket to be both server-side encrypted and fully public-access-blocked
+    - aws_s3_bucket_public_access_block.audit.bucket
+      observed: "configures log bucket \"example-compliant-audit\""
+      expected: the log bucket to be both server-side encrypted and fully public-access-blocked
+
+PASS  LOG-02  log/cloudtrail-log-validation
+    title: Audit Logs Protection
     - aws_cloudtrail.main.enable_log_file_validation
       observed: true
       expected: true
@@ -167,6 +185,18 @@ PASS  LOG-03  log/vpc-flow-logs
 
 PASS  LOG-04  log/cloudtrail-accountability
     title: Audit Logs Access and Accountability
+    - aws_cloudtrail.audit.cloud_watch_logs_group_arn
+      observed: null
+      expected: delivery to CloudWatch Logs, or access logging on the log bucket
+    - aws_s3_bucket_logging.audit.bucket
+      observed: "configures server access logging on log bucket \"example-compliant-audit\""
+      expected: delivery to CloudWatch Logs, or access logging on the log bucket
+    - aws_s3_bucket_logging.audit_extra.bucket
+      observed: "configures server access logging on log bucket \"example-compliant-audit\""
+      expected: delivery to CloudWatch Logs, or access logging on the log bucket
+
+PASS  LOG-04  log/cloudtrail-accountability
+    title: Audit Logs Access and Accountability
     - aws_cloudtrail.main.cloud_watch_logs_group_arn
       observed: "arn:aws:logs:eu-west-2:123456789012:log-group:cloudtrail:*"
       expected: delivery to CloudWatch Logs, or access logging on the log bucket
@@ -178,6 +208,15 @@ NOT_APPLICABLE  LOG-05  log/na-operational
 NOT_APPLICABLE  LOG-06  log/na-host-runtime
     title: Clock Synchronization
     reason: NTP and clock synchronisation are configured inside the host or image, below the infrastructure graph this scanner reads.
+
+PASS  LOG-07  log/cloudtrail-multi-region
+    title: Logging Scope
+    - aws_cloudtrail.audit.is_multi_region_trail
+      observed: true
+      expected: true
+    - aws_cloudtrail.audit.include_global_service_events
+      observed: true
+      expected: true
 
 PASS  LOG-07  log/cloudtrail-multi-region
     title: Logging Scope

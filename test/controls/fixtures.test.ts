@@ -173,6 +173,65 @@ describe("the non-compliant fixture", () => {
 });
 
 /**
+ * Deferred M4 review finding F-5. Four verdict paths were exercised only by the
+ * hand-written boundary tests in `boundaries-log-ivs.test.ts`, never by the
+ * fixture-derived goldens. The fixtures were extended so those goldens are a
+ * fuller specimen and the four mutants the boundary tests pin are also killed by
+ * the end-to-end lane. These assertions name each path; the goldens hold the
+ * exact evidence and reasons. Both lanes carry the same resources, so the
+ * additions did not change which control/check pairs pass or fail above.
+ */
+describe("F-5 verdict paths, exercised end to end", () => {
+  // Paths 1 and 3. A trail with no CloudWatch group whose log bucket carries
+  // access logging reaches LOG-04's `covered` branch (path 1). Two
+  // aws_s3_bucket_logging resources target that one bucket, so correlateBy must
+  // accumulate and the branch must cite *both* satellites, not only the last
+  // one seen (path 3).
+  it("passes LOG-04 via bucket access logging, citing every logging satellite", () => {
+    const verdict = compliant.find(
+      (v) =>
+        v.checkId === "log/cloudtrail-accountability" &&
+        v.evidence.some((item) => item.resourceAddress === "aws_cloudtrail.audit"),
+    );
+    expect(verdict?.status).toBe("pass");
+    const cited = verdict?.evidence.map((item) => item.resourceAddress) ?? [];
+    expect(cited).toContain("aws_s3_bucket_logging.audit");
+    expect(cited).toContain("aws_s3_bucket_logging.audit_extra");
+  });
+
+  // Path 2. The audit trail's log bucket is declared in another module, so its
+  // LOG-02 verdict rests on the satellites alone: there is no aws_s3_bucket to
+  // cite, and nothing "holds the logs".
+  it("passes LOG-02 on the satellites alone when the log bucket is declared elsewhere", () => {
+    const verdict = compliant.find(
+      (v) =>
+        v.checkId === "log/cloudtrail-log-validation" &&
+        v.evidence.some((item) => item.resourceAddress === "aws_cloudtrail.audit"),
+    );
+    expect(verdict?.status).toBe("pass");
+    const cited = verdict?.evidence.map((item) => item.resourceAddress) ?? [];
+    expect(cited).toContain("aws_s3_bucket_server_side_encryption_configuration.audit");
+    expect(cited).toContain("aws_s3_bucket_public_access_block.audit");
+    expect(verdict?.evidence.some((item) => String(item.observed).includes("holds the logs"))).toBe(
+      false,
+    );
+  });
+
+  // Path 4. More VPCs than a declared default security group covers, where one
+  // group omits its vpc_id, so the pairing cannot be resolved and the check
+  // counts rather than names. This branch needs an unresolvable id; a snapshot
+  // has no unknown-until-apply, so the fixture reaches it with a vpc_id-less
+  // default group instead — a shape both lanes share.
+  it("reports IVS-06's counting branch when a default group omits its vpc_id", () => {
+    const verdict = nonCompliant.find(
+      (v) => v.checkId === "ivs/default-sg-locked-down" && v.status === "not_applicable",
+    );
+    expect(verdict?.reason).toContain("3 VPC(s) but only 2 of them are covered");
+    expect(verdict?.reason).toContain("declares no vpc_id");
+  });
+});
+
+/**
  * ADR-0003 requires every Yes/Partial control to have both a compliant and a
  * non-compliant fixture. Without this the suite cannot detect a check that has
  * been stubbed out — which is exactly how a whole check can silently stop

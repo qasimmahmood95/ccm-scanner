@@ -8,7 +8,7 @@
     "ccmVersion": "v4.0.13",
     "input": {
       "source": "fixtures/compliant/terraform-plan.json",
-      "digest": "00b94601f7c1e76e755c9c3df98892ea4e51570f753fc1f9b1ba463a0bdb381b"
+      "digest": "4cbbce25a125a9f2533f2c154f4fc99d368273c58761574be89fe1df7d3c1352"
     },
     "generatedAt": "2026-07-21T00:00:00.000Z"
   },
@@ -20,10 +20,10 @@
     "total": 22
   },
   "findings": {
-    "pass": 21,
+    "pass": 25,
     "fail": 0,
     "notApplicable": 8,
-    "total": 29
+    "total": 33
   },
   "domains": [
     {
@@ -50,10 +50,10 @@
         "total": 6
       },
       "findings": {
-        "pass": 4,
+        "pass": 7,
         "fail": 0,
         "notApplicable": 2,
-        "total": 6
+        "total": 9
       }
     },
     {
@@ -65,10 +65,10 @@
         "total": 5
       },
       "findings": {
-        "pass": 7,
+        "pass": 8,
         "fail": 0,
         "notApplicable": 2,
-        "total": 9
+        "total": 10
       }
     },
     {
@@ -150,6 +150,22 @@
           "attribute": "bucket",
           "observed": "a bucket policy denies all non-TLS requests",
           "expected": "a policy denying every principal when aws:SecureTransport is false"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-04",
+      "ccmTitle": "Encryption Algorithm",
+      "checkId": "cek/approved-algorithms",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_s3_bucket_server_side_encryption_configuration.audit",
+          "attribute": "rule[].apply_server_side_encryption_by_default.sse_algorithm",
+          "observed": [
+            "aws:kms"
+          ],
+          "expected": "one of aws:kms, aws:kms:dsse, AES256"
         }
       ]
     },
@@ -431,6 +447,32 @@
       "status": "pass",
       "evidence": [
         {
+          "resourceAddress": "aws_cloudtrail.audit",
+          "attribute": "enable_log_file_validation",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "aws_s3_bucket_server_side_encryption_configuration.audit",
+          "attribute": "bucket",
+          "observed": "configures log bucket \"example-compliant-audit\"",
+          "expected": "the log bucket to be both server-side encrypted and fully public-access-blocked"
+        },
+        {
+          "resourceAddress": "aws_s3_bucket_public_access_block.audit",
+          "attribute": "bucket",
+          "observed": "configures log bucket \"example-compliant-audit\"",
+          "expected": "the log bucket to be both server-side encrypted and fully public-access-blocked"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-02",
+      "ccmTitle": "Audit Logs Protection",
+      "checkId": "log/cloudtrail-log-validation",
+      "status": "pass",
+      "evidence": [
+        {
           "resourceAddress": "aws_cloudtrail.main",
           "attribute": "enable_log_file_validation",
           "observed": true,
@@ -477,6 +519,32 @@
       "status": "pass",
       "evidence": [
         {
+          "resourceAddress": "aws_cloudtrail.audit",
+          "attribute": "cloud_watch_logs_group_arn",
+          "observed": null,
+          "expected": "delivery to CloudWatch Logs, or access logging on the log bucket"
+        },
+        {
+          "resourceAddress": "aws_s3_bucket_logging.audit",
+          "attribute": "bucket",
+          "observed": "configures server access logging on log bucket \"example-compliant-audit\"",
+          "expected": "delivery to CloudWatch Logs, or access logging on the log bucket"
+        },
+        {
+          "resourceAddress": "aws_s3_bucket_logging.audit_extra",
+          "attribute": "bucket",
+          "observed": "configures server access logging on log bucket \"example-compliant-audit\"",
+          "expected": "delivery to CloudWatch Logs, or access logging on the log bucket"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-04",
+      "ccmTitle": "Audit Logs Access and Accountability",
+      "checkId": "log/cloudtrail-accountability",
+      "status": "pass",
+      "evidence": [
+        {
           "resourceAddress": "aws_cloudtrail.main",
           "attribute": "cloud_watch_logs_group_arn",
           "observed": "arn:aws:logs:eu-west-2:123456789012:log-group:cloudtrail:*",
@@ -499,6 +567,26 @@
       "status": "not_applicable",
       "evidence": [],
       "reason": "NTP and clock synchronisation are configured inside the host or image, below the infrastructure graph this scanner reads."
+    },
+    {
+      "ccmId": "LOG-07",
+      "ccmTitle": "Logging Scope",
+      "checkId": "log/cloudtrail-multi-region",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_cloudtrail.audit",
+          "attribute": "is_multi_region_trail",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "aws_cloudtrail.audit",
+          "attribute": "include_global_service_events",
+          "observed": true,
+          "expected": "true"
+        }
+      ]
     },
     {
       "ccmId": "LOG-07",
