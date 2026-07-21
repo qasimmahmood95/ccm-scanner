@@ -1,13 +1,13 @@
 # ccm-scanner report
 
-**Result: FAIL** — 22 controls assessed: 0 pass, 13 fail, 9 not applicable (from 31 findings)
+**Result: FAIL** — 22 controls assessed: 0 pass, 13 fail, 9 not applicable (from 35 findings)
 
 | Field | Value |
 | --- | --- |
 | Tool | ccm-scanner 0.1.0 |
 | CCM version | v4.0.13 |
 | Input | `fixtures/non-compliant/terraform-plan.json` |
-| Input digest | `sha256:0a49f664df292b6c08e4e42bd0db03ea6ccd19afd4d2b55dd20a2aff7bfe2bc4` |
+| Input digest | `sha256:8960a7e348c2472a909c149c0d081f005cc496d9ccc2493f136671faf4f8a101` |
 | Generated | 2026-07-21T00:00:00.000Z |
 
 ## Coverage by domain
@@ -15,9 +15,9 @@
 | Domain | Controls | Pass | Fail | N/A | Findings |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | IAM — Identity & Access Management | 7 | 0 | 4 | 3 | 7 |
-| LOG — Logging & Monitoring | 6 | 0 | 4 | 2 | 6 |
+| LOG — Logging & Monitoring | 6 | 0 | 4 | 2 | 8 |
 | CEK — Cryptography, Encryption & Key Management | 5 | 0 | 3 | 2 | 11 |
-| IVS — Infrastructure & Virtualization Security | 4 | 0 | 2 | 2 | 7 |
+| IVS — Infrastructure & Virtualization Security | 4 | 0 | 2 | 2 | 9 |
 
 ## IAM — Identity & Access Management
 
@@ -102,6 +102,14 @@ Check: `log/vpc-flow-logs`
 
 - `aws_vpc.main` — `id`
   - observed: `"no aws_flow_log targets \"vpc-0badc0ffee1234567\""`
+  - expected: a VPC flow log capturing this VPC's traffic
+
+- `aws_vpc.secondary` — `id`
+  - observed: `"no aws_flow_log targets \"vpc-0badc0ffee7654321\""`
+  - expected: a VPC flow log capturing this VPC's traffic
+
+- `aws_vpc.tertiary` — `id`
+  - observed: `"no aws_flow_log targets \"vpc-0badc0ffeeabcdef0\""`
   - expected: a VPC flow log capturing this VPC's traffic
 
 ### FAIL · LOG-04 Audit Logs Access and Accountability
@@ -234,10 +242,19 @@ Reason: OS and AMI hardening lives inside the image or host. An instance declara
 
 Check: `ivs/default-sg-locked-down`
 
+Reason: This input declares 3 VPC(s) but only 2 of them are covered by a declared aws_default_security_group, so at least 1 default security group(s) keep the rules AWS created them with. Which VPCs cannot be said: a aws_default_security_group declares no vpc_id, so which VPC it adopts is not stated, so they cannot be matched to the groups that adopt them.
+
 - `aws_default_security_group.default` — `ingress`
   - observed: `[{"from_port":0,"to_port":0,"protocol":"-1","self":true,"cidr_blocks":[]}]`
   - expected: no rules
 - `aws_default_security_group.default` — `egress`
+  - observed: `"no rules"`
+  - expected: no rules
+
+- `aws_default_security_group.unscoped` — `ingress`
+  - observed: `"no rules"`
+  - expected: no rules
+- `aws_default_security_group.unscoped` — `egress`
   - observed: `"no rules"`
   - expected: no rules
 

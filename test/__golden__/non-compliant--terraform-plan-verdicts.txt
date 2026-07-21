@@ -139,12 +139,25 @@ NOT_APPLICABLE  IVS-04  ivs/na-host-config
     title: OS Hardening and Base Controls
     reason: OS and AMI hardening lives inside the image or host. An instance declaration names an AMI but carries no signal of how that image was built or configured.
 
+NOT_APPLICABLE  IVS-06  ivs/default-sg-locked-down
+    title: Segmentation and Segregation
+    reason: This input declares 3 VPC(s) but only 2 of them are covered by a declared aws_default_security_group, so at least 1 default security group(s) keep the rules AWS created them with. Which VPCs cannot be said: a aws_default_security_group declares no vpc_id, so which VPC it adopts is not stated, so they cannot be matched to the groups that adopt them.
+
 FAIL  IVS-06  ivs/default-sg-locked-down
     title: Segmentation and Segregation
     - aws_default_security_group.default.ingress
       observed: [{"from_port":0,"to_port":0,"protocol":"-1","self":true,"cidr_blocks":[]}]
       expected: no rules
     - aws_default_security_group.default.egress
+      observed: "no rules"
+      expected: no rules
+
+PASS  IVS-06  ivs/default-sg-locked-down
+    title: Segmentation and Segregation
+    - aws_default_security_group.unscoped.ingress
+      observed: "no rules"
+      expected: no rules
+    - aws_default_security_group.unscoped.egress
       observed: "no rules"
       expected: no rules
 
@@ -162,6 +175,18 @@ FAIL  LOG-03  log/vpc-flow-logs
     title: Security Monitoring and Alerting
     - aws_vpc.main.id
       observed: "no aws_flow_log targets \"vpc-0badc0ffee1234567\""
+      expected: a VPC flow log capturing this VPC's traffic
+
+FAIL  LOG-03  log/vpc-flow-logs
+    title: Security Monitoring and Alerting
+    - aws_vpc.secondary.id
+      observed: "no aws_flow_log targets \"vpc-0badc0ffee7654321\""
+      expected: a VPC flow log capturing this VPC's traffic
+
+FAIL  LOG-03  log/vpc-flow-logs
+    title: Security Monitoring and Alerting
+    - aws_vpc.tertiary.id
+      observed: "no aws_flow_log targets \"vpc-0badc0ffeeabcdef0\""
       expected: a VPC flow log capturing this VPC's traffic
 
 FAIL  LOG-04  log/cloudtrail-accountability

@@ -17,6 +17,7 @@ function addressesOf(result: typeof compliant): string[] {
 describe("ingestTerraformPlan", () => {
   it("collects managed resources from the root module and nested child modules", () => {
     expect(addressesOf(compliant)).toEqual([
+      "aws_cloudtrail.audit",
       "aws_cloudtrail.main",
       "aws_default_security_group.default",
       "aws_flow_log.main",
@@ -25,6 +26,10 @@ describe("ingestTerraformPlan", () => {
       "aws_iam_policy.require_mfa",
       "aws_iam_role.app",
       "aws_kms_key.logs",
+      "aws_s3_bucket_logging.audit",
+      "aws_s3_bucket_logging.audit_extra",
+      "aws_s3_bucket_public_access_block.audit",
+      "aws_s3_bucket_server_side_encryption_configuration.audit",
       "aws_security_group.web",
       "aws_vpc.main",
       'module.storage.aws_s3_bucket.logs["primary"]',

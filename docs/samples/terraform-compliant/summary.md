@@ -1,13 +1,13 @@
 # ccm-scanner report
 
-**Result: PASS** — 22 controls assessed: 14 pass, 0 fail, 8 not applicable (from 29 findings)
+**Result: PASS** — 22 controls assessed: 14 pass, 0 fail, 8 not applicable (from 33 findings)
 
 | Field | Value |
 | --- | --- |
 | Tool | ccm-scanner 0.1.0 |
 | CCM version | v4.0.13 |
 | Input | `fixtures/compliant/terraform-plan.json` |
-| Input digest | `sha256:00b94601f7c1e76e755c9c3df98892ea4e51570f753fc1f9b1ba463a0bdb381b` |
+| Input digest | `sha256:4cbbce25a125a9f2533f2c154f4fc99d368273c58761574be89fe1df7d3c1352` |
 | Generated | 2026-07-21T00:00:00.000Z |
 
 ## Coverage by domain
@@ -15,8 +15,8 @@
 | Domain | Controls | Pass | Fail | N/A | Findings |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | IAM — Identity & Access Management | 7 | 5 | 0 | 2 | 8 |
-| LOG — Logging & Monitoring | 6 | 4 | 0 | 2 | 6 |
-| CEK — Cryptography, Encryption & Key Management | 5 | 3 | 0 | 2 | 9 |
+| LOG — Logging & Monitoring | 6 | 4 | 0 | 2 | 9 |
+| CEK — Cryptography, Encryption & Key Management | 5 | 3 | 0 | 2 | 10 |
 | IVS — Infrastructure & Virtualization Security | 4 | 2 | 0 | 2 | 6 |
 
 ## IAM — Identity & Access Management
@@ -63,13 +63,13 @@ Reason: NTP and clock synchronisation are configured inside the host or image, b
 ### Passing
 
 - LOG-02 Audit Logs Protection
-  - `log/cloudtrail-log-validation` — 1 finding (pass)
+  - `log/cloudtrail-log-validation` — 2 findings (pass)
 - LOG-03 Security Monitoring and Alerting
   - `log/vpc-flow-logs` — 1 finding (pass)
 - LOG-04 Audit Logs Access and Accountability
-  - `log/cloudtrail-accountability` — 1 finding (pass)
+  - `log/cloudtrail-accountability` — 2 findings (pass)
 - LOG-07 Logging Scope
-  - `log/cloudtrail-multi-region` — 1 finding (pass)
+  - `log/cloudtrail-multi-region` — 2 findings (pass)
 
 ## CEK — Cryptography, Encryption & Key Management
 
@@ -91,7 +91,7 @@ Reason: Key destruction is a runtime lifecycle operation. deletion_window_in_day
   - `cek/encryption-at-rest` — 2 findings (pass)
   - `cek/tls-enforced` — 2 findings (pass)
 - CEK-04 Encryption Algorithm
-  - `cek/approved-algorithms` — 2 findings (pass)
+  - `cek/approved-algorithms` — 3 findings (pass)
 - CEK-12 Key Rotation
   - `cek/kms-key-rotation` — 1 finding (pass)
 

@@ -8,7 +8,7 @@
     "ccmVersion": "v4.0.13",
     "input": {
       "source": "fixtures/non-compliant/terraform-plan.json",
-      "digest": "0a49f664df292b6c08e4e42bd0db03ea6ccd19afd4d2b55dd20a2aff7bfe2bc4"
+      "digest": "8960a7e348c2472a909c149c0d081f005cc496d9ccc2493f136671faf4f8a101"
     },
     "generatedAt": "2026-07-21T00:00:00.000Z"
   },
@@ -20,10 +20,10 @@
     "total": 22
   },
   "findings": {
-    "pass": 1,
-    "fail": 20,
-    "notApplicable": 10,
-    "total": 31
+    "pass": 2,
+    "fail": 22,
+    "notApplicable": 11,
+    "total": 35
   },
   "domains": [
     {
@@ -51,9 +51,9 @@
       },
       "findings": {
         "pass": 0,
-        "fail": 4,
+        "fail": 6,
         "notApplicable": 2,
-        "total": 6
+        "total": 8
       }
     },
     {
@@ -80,10 +80,10 @@
         "total": 4
       },
       "findings": {
-        "pass": 0,
+        "pass": 1,
         "fail": 5,
-        "notApplicable": 2,
-        "total": 7
+        "notApplicable": 3,
+        "total": 9
       }
     }
   ],
@@ -429,6 +429,14 @@
       "ccmId": "IVS-06",
       "ccmTitle": "Segmentation and Segregation",
       "checkId": "ivs/default-sg-locked-down",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "This input declares 3 VPC(s) but only 2 of them are covered by a declared aws_default_security_group, so at least 1 default security group(s) keep the rules AWS created them with. Which VPCs cannot be said: a aws_default_security_group declares no vpc_id, so which VPC it adopts is not stated, so they cannot be matched to the groups that adopt them."
+    },
+    {
+      "ccmId": "IVS-06",
+      "ccmTitle": "Segmentation and Segregation",
+      "checkId": "ivs/default-sg-locked-down",
       "status": "fail",
       "evidence": [
         {
@@ -447,6 +455,26 @@
         },
         {
           "resourceAddress": "aws_default_security_group.default",
+          "attribute": "egress",
+          "observed": "no rules",
+          "expected": "no rules"
+        }
+      ]
+    },
+    {
+      "ccmId": "IVS-06",
+      "ccmTitle": "Segmentation and Segregation",
+      "checkId": "ivs/default-sg-locked-down",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_default_security_group.unscoped",
+          "attribute": "ingress",
+          "observed": "no rules",
+          "expected": "no rules"
+        },
+        {
+          "resourceAddress": "aws_default_security_group.unscoped",
           "attribute": "egress",
           "observed": "no rules",
           "expected": "no rules"
@@ -485,6 +513,34 @@
           "resourceAddress": "aws_vpc.main",
           "attribute": "id",
           "observed": "no aws_flow_log targets \"vpc-0badc0ffee1234567\"",
+          "expected": "a VPC flow log capturing this VPC's traffic"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-03",
+      "ccmTitle": "Security Monitoring and Alerting",
+      "checkId": "log/vpc-flow-logs",
+      "status": "fail",
+      "evidence": [
+        {
+          "resourceAddress": "aws_vpc.secondary",
+          "attribute": "id",
+          "observed": "no aws_flow_log targets \"vpc-0badc0ffee7654321\"",
+          "expected": "a VPC flow log capturing this VPC's traffic"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-03",
+      "ccmTitle": "Security Monitoring and Alerting",
+      "checkId": "log/vpc-flow-logs",
+      "status": "fail",
+      "evidence": [
+        {
+          "resourceAddress": "aws_vpc.tertiary",
+          "attribute": "id",
+          "observed": "no aws_flow_log targets \"vpc-0badc0ffeeabcdef0\"",
           "expected": "a VPC flow log capturing this VPC's traffic"
         }
       ]

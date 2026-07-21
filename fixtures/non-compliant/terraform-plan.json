@@ -178,6 +178,45 @@
             "cidr_block": "10.0.0.0/16"
           },
           "sensitive_values": {}
+        },
+        {
+          "address": "aws_vpc.secondary",
+          "mode": "managed",
+          "type": "aws_vpc",
+          "name": "secondary",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "id": "vpc-0badc0ffee7654321",
+            "cidr_block": "10.1.0.0/16"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_vpc.tertiary",
+          "mode": "managed",
+          "type": "aws_vpc",
+          "name": "tertiary",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "id": "vpc-0badc0ffeeabcdef0",
+            "cidr_block": "10.2.0.0/16"
+          },
+          "sensitive_values": {}
+        },
+        {
+          "address": "aws_default_security_group.unscoped",
+          "mode": "managed",
+          "type": "aws_default_security_group",
+          "name": "unscoped",
+          "provider_name": "registry.terraform.io/hashicorp/aws",
+          "schema_version": 1,
+          "values": {
+            "ingress": [],
+            "egress": []
+          },
+          "sensitive_values": { "ingress": [], "egress": [] }
         }
       ],
       "child_modules": [
