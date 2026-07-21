@@ -1,7 +1,7 @@
 import { CCM_DOMAIN_TITLES, domainOfCcmId, type CcmDomain } from "../model/ccm.js";
-import type { Status, Verdict } from "../model/verdict.js";
+import type { Evidence, Status, Verdict } from "../model/verdict.js";
 import { compareStrings } from "../util/compare.js";
-import { toJsonSafe } from "../util/json-safe.js";
+import { toJsonSafeProperty } from "../util/json-safe.js";
 import { groupByControl, statusOfControl } from "./build.js";
 import type { Report } from "./types.js";
 
@@ -68,8 +68,15 @@ function codeSpan(text: string): string {
   return `${fence}${padded}${fence}`;
 }
 
-function formatValue(value: unknown): string {
-  return JSON.stringify(toJsonSafe(value)) ?? "null";
+/**
+ * Renders an evidence `observed`, reading it through the safe path.
+ *
+ * `observed` is the one `unknown` the report reads raw, and a hostile getter
+ * would otherwise throw from this renderer — the same gap the JSON renderer and
+ * the comparator close, so it is closed here too (rendering must never throw).
+ */
+function formatObserved(evidence: Evidence): string {
+  return JSON.stringify(toJsonSafeProperty(evidence, "observed")) ?? "null";
 }
 
 function domainHeading(domain: CcmDomain): string {
@@ -125,7 +132,7 @@ function renderEvidence(verdict: Verdict, lines: string[]): void {
         ? codeSpan(item.resourceAddress)
         : `${codeSpan(item.resourceAddress)} — ${codeSpan(item.attribute)}`;
     lines.push(`- ${where}`);
-    lines.push(`  - observed: ${codeSpan(formatValue(item.observed))}`);
+    lines.push(`  - observed: ${codeSpan(formatObserved(item))}`);
     if (item.expected !== undefined) {
       lines.push(`  - expected: ${inlineText(item.expected)}`);
     }

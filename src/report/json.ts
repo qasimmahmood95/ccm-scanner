@@ -1,5 +1,5 @@
 import type { Evidence, Verdict } from "../model/verdict.js";
-import { toJsonSafe } from "../util/json-safe.js";
+import { toJsonSafeProperty } from "../util/json-safe.js";
 import type { DomainRollup, Report, StatusCounts } from "./types.js";
 
 /**
@@ -13,7 +13,7 @@ function serialiseEvidence(evidence: Evidence): Record<string, unknown> {
   if (evidence.attribute !== undefined) {
     out.attribute = evidence.attribute;
   }
-  out.observed = toJsonSafe(evidence.observed);
+  out.observed = toJsonSafeProperty(evidence, "observed");
   if (evidence.expected !== undefined) {
     out.expected = evidence.expected;
   }

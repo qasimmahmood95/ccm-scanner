@@ -9,7 +9,7 @@
  */
 
 import { compareStrings } from "../util/compare.js";
-import { toJsonSafe } from "../util/json-safe.js";
+import { toJsonSafeProperty } from "../util/json-safe.js";
 
 export type Status = "pass" | "fail" | "not_applicable";
 
@@ -105,7 +105,10 @@ function evidenceKey(verdict: Verdict): string {
         // compare equal and let input order leak into the output bytes.
         item.attribute === undefined ? null : item.attribute,
         item.expected === undefined ? null : item.expected,
-        toJsonSafe(item.observed),
+        // Read through the safe path: `observed` is the sort's tie-break, and a
+        // hostile getter here would otherwise throw from inside Array.sort
+        // rather than being contained like every other evidence value.
+        toJsonSafeProperty(item, "observed"),
       ]),
     ) ?? ""
   );

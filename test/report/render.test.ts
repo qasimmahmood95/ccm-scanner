@@ -133,6 +133,37 @@ describe("untrusted values from scanned infrastructure", () => {
     expect(renderSummary(buildReport([verdict], fixedMetadata))).toContain("``aws_sg.a`b``");
   });
 
+  // `observed` is the one evidence field carried as `unknown` and read raw.
+  // A getter that throws on access used to surface from inside Array.sort
+  // (buildReport sorts before rendering); now it is contained, so the whole
+  // pipeline — build, both renderers — completes with the value marked rather
+  // than throwing. Rendering the report must never throw.
+  it("contains a getter that throws when its observed value is read", () => {
+    const evidence = {
+      resourceAddress: "aws_kms_key.k",
+      get observed(): unknown {
+        throw new Error("hostile getter");
+      },
+    };
+    const verdict = verdictOf(IVS_03, fail([evidence]));
+    const report = buildReport([verdict], fixedMetadata);
+    expect(renderJson(report)).toContain("[unserialisable]");
+    expect(renderSummary(report)).toContain("[unserialisable]");
+  });
+
+  // A pathologically deep observed value must not blow the stack in the
+  // indented JSON.stringify the JSON renderer runs.
+  it("renders a pathologically deep observed value", () => {
+    let deep: unknown = "leaf";
+    for (let i = 0; i < 20_000; i += 1) {
+      deep = { next: deep };
+    }
+    const verdict = verdictOf(IVS_03, fail([{ resourceAddress: "aws_kms_key.k", observed: deep }]));
+    const report = buildReport([verdict], fixedMetadata);
+    expect(() => renderJson(report)).not.toThrow();
+    expect(renderJson(report)).toContain("[too deep]");
+  });
+
   // A resource address is arbitrary text (a for_each key, a tag). Left raw, a
   // newline lets it forge document structure inside the audit deliverable.
   it("cannot forge a heading via newlines in a resource address", () => {
