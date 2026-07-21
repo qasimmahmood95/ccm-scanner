@@ -8,6 +8,11 @@ package-lock.json
 # must not touch them or the golden tests become meaningless.
 test/__golden__
 
+# Sample evidence packs are the same: they must match what the CLI emits
+# byte-for-byte (that is what makes them a faithful sample), so Prettier must
+# not reflow them out of step with the generator.
+docs/samples/**/*.json
+
 # Hand-authored Markdown (CLAUDE.md, docs/, ADRs, README) is kept as written;
 # Prettier must not reflow the control-mapping tables.
 *.md

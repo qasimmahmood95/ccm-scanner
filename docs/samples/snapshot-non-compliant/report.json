@@ -204,7 +204,9 @@
         {
           "resourceAddress": "module.storage.aws_s3_bucket_server_side_encryption_configuration.weak_algorithm",
           "attribute": "rule[].apply_server_side_encryption_by_default.sse_algorithm",
-          "observed": ["AES128"],
+          "observed": [
+            "AES128"
+          ],
           "expected": "one of aws:kms, aws:kms:dsse, AES256"
         }
       ]
@@ -289,8 +291,12 @@
           "observed": [
             {
               "Effect": "Allow",
-              "Action": ["*"],
-              "Resource": ["*"]
+              "Action": [
+                "*"
+              ],
+              "Resource": [
+                "*"
+              ]
             }
           ],
           "expected": "no Allow statement pairing a wildcard action with a wildcard resource"
@@ -344,7 +350,9 @@
           "attribute": "assume_role_policy",
           "observed": [
             {
-              "Principal": ["*"]
+              "Principal": [
+                "*"
+              ]
             }
           ],
           "expected": "no unconditioned Allow for a wildcard principal"
@@ -364,7 +372,9 @@
             "protocol": "tcp",
             "from_port": 22,
             "to_port": 22,
-            "cidrs": ["0.0.0.0/0"],
+            "cidrs": [
+              "0.0.0.0/0"
+            ],
             "exposure": "sensitive port(s) 22 open to the world"
           },
           "expected": "no ingress from 0.0.0.0/0 or ::/0 to ports 22, 3389, 3306, 5432, 1433, 27017, 6379"

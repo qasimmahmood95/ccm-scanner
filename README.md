@@ -151,8 +151,9 @@ The scanner issues no cloud calls at all — you produce the snapshot, so the to
 never needs credentials of any kind ([ADR-0004](docs/adr/0004-snapshot-lane.md)).
 
 **1. Grant a least-privilege read-only role.** These are the only permissions
-the documented commands need. There is no write action in this policy, and no
-`iam:*` beyond reading account settings:
+the documented commands need. Every action is a `Describe`/`Get`/`List` — there
+is no write action in this policy, and nothing under `iam:` beyond reading the
+account password policy and enumerating policies and roles:
 
 ```json
 {

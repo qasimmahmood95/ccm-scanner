@@ -39,10 +39,11 @@ addresses, attribute values, CIDR blocks and policy fragments. That is the point
 as sensitive as the configuration it describes. Treat it accordingly before
 attaching it to a ticket or committing it.
 
-**Values Terraform marks sensitive are redacted.** `terraform show -json` of
-*state* puts real secrets in `values` and marks them in `sensitive_values`;
-`ccm-scanner` honours those marks before any renderer runs, so a marked value
-never reaches either output format.
+**Values the input marks sensitive are redacted.** `terraform show -json` of
+*state* puts real secrets in `values` and marks them in `sensitive_values`; a
+snapshot marks them with `sensitiveAttributes`. Either way `ccm-scanner` honours
+those marks before any renderer runs, so a marked value never reaches either
+output format.
 
 The limits are worth stating, because a control that overstates itself is worse
 than one that does not exist. Redaction covers an evidence entry that cites a

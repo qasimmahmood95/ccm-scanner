@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { allChecks } from "../../src/controls/index.js";
+import { runScan } from "../../src/cli/run.js";
 import {
   createRegistry,
   detectFormat,
@@ -8,6 +9,7 @@ import {
   ingest,
   ingestSnapshot,
   IngestError,
+  REDACTED,
   type Verdict,
 } from "../../src/index.js";
 
@@ -45,6 +47,24 @@ describe("format detection", () => {
 
   it("recognises Terraform output", () => {
     expect(detectFormat(fixture("compliant/terraform-plan.json"))).toBe("terraform");
+  });
+
+  // `terraform show -json` of *state* carries `values` rather than
+  // `planned_values`, and may omit the version markers.
+  it("recognises Terraform state by its values key alone", () => {
+    expect(detectFormat('{"values":{"root_module":{"resources":[]}}}')).toBe("terraform");
+  });
+
+  // The marker is a top-level key, so a plan merely mentioning the string in a
+  // resource attribute is not misrouted.
+  it("does not misroute a plan that merely mentions the marker string", () => {
+    const plan = JSON.stringify({
+      format_version: "1.2",
+      planned_values: {
+        root_module: { resources: [{ values: { note: "ccmScannerSnapshot" } }] },
+      },
+    });
+    expect(detectFormat(plan)).toBe("terraform");
   });
 
   // Neither shape is not a reason to guess: an empty model would scan clean.
@@ -129,6 +149,66 @@ describe("the snapshot adapter", () => {
   it("warns rather than scanning clean when a snapshot is empty", () => {
     const { warnings } = ingestSnapshot('{"ccmScannerSnapshot":"1","resources":[]}', "s");
     expect(warnings).toContain("no resources found in the snapshot");
+  });
+
+  // The report must not depend on the order the producer happened to emit, and
+  // a producer is under no obligation to sort. The fixtures are authored
+  // pre-sorted, so this uses an out-of-order input to actually exercise it.
+  it("sorts resources by address, whatever order the producer emitted", () => {
+    const raw = JSON.stringify({
+      ccmScannerSnapshot: "1",
+      resources: [
+        { address: "aws_s3_bucket.z", type: "aws_s3_bucket", attributes: {} },
+        { address: "aws_s3_bucket.a", type: "aws_s3_bucket", attributes: {} },
+        { address: "aws_s3_bucket.m", type: "aws_s3_bucket", attributes: {} },
+      ],
+    });
+    const { model } = ingestSnapshot(raw, "s");
+    expect(model.resources.map((resource) => resource.address)).toEqual([
+      "aws_s3_bucket.a",
+      "aws_s3_bucket.m",
+      "aws_s3_bucket.z",
+    ]);
+  });
+});
+
+describe("the snapshot lane redacts, end to end", () => {
+  // Redaction keys off `Resource.sensitiveAttributes`, which both adapters
+  // populate — but nothing pinned that a *snapshot* mark actually reaches it
+  // and drives redaction. A leak here would publish a secret the operator
+  // explicitly flagged.
+  it("redacts a value a snapshot marked sensitive", () => {
+    const raw = JSON.stringify({
+      ccmScannerSnapshot: "1",
+      resources: [
+        {
+          address: "aws_kms_key.main",
+          type: "aws_kms_key",
+          attributes: { enable_key_rotation: false, customer_master_key_spec: "SYMMETRIC_DEFAULT" },
+          sensitiveAttributes: ["enable_key_rotation"],
+        },
+      ],
+    });
+    const result = runScan({
+      raw,
+      source: "memory:snapshot",
+      options: {
+        controls: { kind: "some", domains: [], ccmIds: ["CEK-12"] },
+        format: "both",
+        failOn: "fail",
+        out: "./out",
+        inputFormat: undefined,
+      },
+      tool: { name: "ccm-scanner", version: "0.0.0-test" },
+      generatedAt: "2026-07-21T00:00:00.000Z",
+    });
+    for (const artifact of result.artifacts) {
+      expect(artifact.contents, artifact.name).toContain("redacted");
+    }
+    const kms = result.report.verdicts.find(
+      (verdict) => verdict.checkId === "cek/kms-key-rotation",
+    );
+    expect(kms?.evidence[0]?.observed).toBe(REDACTED);
   });
 });
 

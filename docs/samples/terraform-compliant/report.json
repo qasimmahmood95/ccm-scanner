@@ -162,7 +162,9 @@
         {
           "resourceAddress": "module.storage.aws_s3_bucket_server_side_encryption_configuration.logs",
           "attribute": "rule[].apply_server_side_encryption_by_default.sse_algorithm",
-          "observed": ["aws:kms"],
+          "observed": [
+            "aws:kms"
+          ],
           "expected": "one of aws:kms, aws:kms:dsse, AES256"
         }
       ]
@@ -176,7 +178,9 @@
         {
           "resourceAddress": "module.storage.module.replica.aws_s3_bucket_server_side_encryption_configuration.archive",
           "attribute": "rule[].apply_server_side_encryption_by_default.sse_algorithm",
-          "observed": ["aws:kms"],
+          "observed": [
+            "aws:kms"
+          ],
           "expected": "one of aws:kms, aws:kms:dsse, AES256"
         }
       ]
@@ -328,7 +332,9 @@
         {
           "resourceAddress": "aws_iam_role.app",
           "attribute": "assume_role_policy",
-          "observed": ["ec2.amazonaws.com"],
+          "observed": [
+            "ec2.amazonaws.com"
+          ],
           "expected": "no unconditioned Allow for a wildcard principal"
         }
       ]
@@ -346,7 +352,9 @@
             "protocol": "tcp",
             "from_port": 443,
             "to_port": 443,
-            "cidrs": ["0.0.0.0/0"]
+            "cidrs": [
+              "0.0.0.0/0"
+            ]
           },
           "expected": "no ingress from 0.0.0.0/0 or ::/0 to ports 22, 3389, 3306, 5432, 1433, 27017, 6379"
         }
