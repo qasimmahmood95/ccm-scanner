@@ -31,12 +31,32 @@ describe("toJsonSafe depth bound", () => {
     expect(JSON.stringify(coerced)).toContain("[too deep]");
   });
 
-  it("bounds a deep array the same way", () => {
+  // Asserting the *marker*, not merely that stringify survives: the coerce
+  // backstop catch would also stop a throw, so `not.toThrow()` alone cannot
+  // tell "the cap bounded the array" from "the walk overflowed and was caught".
+  it("bounds a deep array with the cap, not the overflow backstop", () => {
     let value: unknown = "leaf";
     for (let i = 0; i < 50_000; i += 1) {
       value = [value];
     }
-    expect(() => JSON.stringify(toJsonSafe(value), null, 2)).not.toThrow();
+    const coerced = toJsonSafe(value);
+    expect(() => JSON.stringify(coerced, null, 2)).not.toThrow();
+    expect(JSON.stringify(coerced)).toContain("[too deep]");
+    expect(JSON.stringify(coerced)).not.toContain("[unserialisable]");
+  });
+
+  it("bounds a deep Set and Map the same way", () => {
+    let set: unknown = "leaf";
+    for (let i = 0; i < 50_000; i += 1) {
+      set = new Set([set]);
+    }
+    expect(JSON.stringify(toJsonSafe(set))).toContain("[too deep]");
+
+    let map: unknown = "leaf";
+    for (let i = 0; i < 50_000; i += 1) {
+      map = new Map([["next", map]]);
+    }
+    expect(JSON.stringify(toJsonSafe(map))).toContain("[too deep]");
   });
 });
 
