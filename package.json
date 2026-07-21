@@ -42,6 +42,7 @@
     "test:watch": "vitest",
     "verify:fixtures": "npm run build && tsx scripts/verify-fixtures.ts",
     "goldens:update": "tsx scripts/update-goldens.ts",
+    "samples:update": "npm run build && tsx scripts/update-samples.ts",
     "scan": "tsx src/cli/index.ts",
     "prepare": "husky"
   },

@@ -1,0 +1,524 @@
+{
+  "schemaVersion": "1.1.0",
+  "metadata": {
+    "tool": {
+      "name": "ccm-scanner",
+      "version": "0.1.0"
+    },
+    "ccmVersion": "v4.0.13",
+    "input": {
+      "source": "fixtures/compliant/terraform-plan.json",
+      "digest": "00b94601f7c1e76e755c9c3df98892ea4e51570f753fc1f9b1ba463a0bdb381b"
+    },
+    "generatedAt": "2026-07-21T00:00:00.000Z"
+  },
+  "headline": "pass",
+  "controls": {
+    "pass": 14,
+    "fail": 0,
+    "notApplicable": 8,
+    "total": 22
+  },
+  "findings": {
+    "pass": 21,
+    "fail": 0,
+    "notApplicable": 8,
+    "total": 29
+  },
+  "domains": [
+    {
+      "domain": "IAM",
+      "controls": {
+        "pass": 5,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 7
+      },
+      "findings": {
+        "pass": 6,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 8
+      }
+    },
+    {
+      "domain": "LOG",
+      "controls": {
+        "pass": 4,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 6
+      },
+      "findings": {
+        "pass": 4,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 6
+      }
+    },
+    {
+      "domain": "CEK",
+      "controls": {
+        "pass": 3,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 5
+      },
+      "findings": {
+        "pass": 7,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 9
+      }
+    },
+    {
+      "domain": "IVS",
+      "controls": {
+        "pass": 2,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 4
+      },
+      "findings": {
+        "pass": 4,
+        "fail": 0,
+        "notApplicable": 2,
+        "total": 6
+      }
+    }
+  ],
+  "warnings": [],
+  "verdicts": [
+    {
+      "ccmId": "CEK-01",
+      "ccmTitle": "Encryption and Key Management Policy and Procedures",
+      "checkId": "cek/na-governance",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "A policy-and-procedures document is a governance artifact. Declarative infrastructure carries no signal of whether one exists or is followed."
+    },
+    {
+      "ccmId": "CEK-03",
+      "ccmTitle": "Data Encryption",
+      "checkId": "cek/encryption-at-rest",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket.logs[\"primary\"]",
+          "attribute": "bucket",
+          "observed": "covered by an aws_s3_bucket_server_side_encryption_configuration",
+          "expected": "server-side encryption configured for the bucket"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-03",
+      "ccmTitle": "Data Encryption",
+      "checkId": "cek/encryption-at-rest",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.module.replica.aws_s3_bucket.archive",
+          "attribute": "bucket",
+          "observed": "covered by an aws_s3_bucket_server_side_encryption_configuration",
+          "expected": "server-side encryption configured for the bucket"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-03",
+      "ccmTitle": "Data Encryption",
+      "checkId": "cek/tls-enforced",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket.logs[\"primary\"]",
+          "attribute": "bucket",
+          "observed": "a bucket policy denies all non-TLS requests",
+          "expected": "a policy denying every principal when aws:SecureTransport is false"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-03",
+      "ccmTitle": "Data Encryption",
+      "checkId": "cek/tls-enforced",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.module.replica.aws_s3_bucket.archive",
+          "attribute": "bucket",
+          "observed": "a bucket policy denies all non-TLS requests",
+          "expected": "a policy denying every principal when aws:SecureTransport is false"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-04",
+      "ccmTitle": "Encryption Algorithm",
+      "checkId": "cek/approved-algorithms",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket_server_side_encryption_configuration.logs",
+          "attribute": "rule[].apply_server_side_encryption_by_default.sse_algorithm",
+          "observed": [
+            "aws:kms"
+          ],
+          "expected": "one of aws:kms, aws:kms:dsse, AES256"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-04",
+      "ccmTitle": "Encryption Algorithm",
+      "checkId": "cek/approved-algorithms",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.module.replica.aws_s3_bucket_server_side_encryption_configuration.archive",
+          "attribute": "rule[].apply_server_side_encryption_by_default.sse_algorithm",
+          "observed": [
+            "aws:kms"
+          ],
+          "expected": "one of aws:kms, aws:kms:dsse, AES256"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-12",
+      "ccmTitle": "Key Rotation",
+      "checkId": "cek/kms-key-rotation",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_kms_key.logs",
+          "attribute": "enable_key_rotation",
+          "observed": true,
+          "expected": "true"
+        }
+      ]
+    },
+    {
+      "ccmId": "CEK-14",
+      "ccmTitle": "Key Destruction",
+      "checkId": "cek/na-lifecycle-runtime",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "Key destruction is a runtime lifecycle operation. deletion_window_in_days states intent but does not evidence that a key was ever destroyed."
+    },
+    {
+      "ccmId": "IAM-02",
+      "ccmTitle": "Strong Password Policy and Procedures",
+      "checkId": "iam/account-password-policy",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "minimum_password_length",
+          "observed": 14,
+          "expected": "at least 14 characters"
+        },
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "require_uppercase_characters",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "require_lowercase_characters",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "require_numbers",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "require_symbols",
+          "observed": true,
+          "expected": "true"
+        }
+      ]
+    },
+    {
+      "ccmId": "IAM-03",
+      "ccmTitle": "Identity Inventory",
+      "checkId": "iam/na-runtime-inventory",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "A complete identity inventory requires enumerating the live account's principals. An IaC module is not authoritative for identities created outside it. Becomes checkable in the cloud-snapshot lane."
+    },
+    {
+      "ccmId": "IAM-05",
+      "ccmTitle": "Least Privilege",
+      "checkId": "iam/no-wildcard-allow",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_iam_policy.read_only",
+          "attribute": "policy",
+          "observed": "1 statement(s), none granting *:*",
+          "expected": "no Allow statement pairing a wildcard action with a wildcard resource"
+        }
+      ]
+    },
+    {
+      "ccmId": "IAM-05",
+      "ccmTitle": "Least Privilege",
+      "checkId": "iam/no-wildcard-allow",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_iam_policy.require_mfa",
+          "attribute": "policy",
+          "observed": "1 statement(s), none granting *:*",
+          "expected": "no Allow statement pairing a wildcard action with a wildcard resource"
+        }
+      ]
+    },
+    {
+      "ccmId": "IAM-08",
+      "ccmTitle": "User Access Review",
+      "checkId": "iam/na-process-control",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "Periodic access review is a temporal, process control. Declarative infrastructure carries no signal of whether or when a review happened."
+    },
+    {
+      "ccmId": "IAM-14",
+      "ccmTitle": "Strong Authentication",
+      "checkId": "iam/mfa-enforcement-present",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_iam_policy.require_mfa",
+          "attribute": "policy",
+          "observed": "requires aws:MultiFactorAuthPresent",
+          "expected": "privileged access conditioned on MFA"
+        }
+      ]
+    },
+    {
+      "ccmId": "IAM-15",
+      "ccmTitle": "Passwords Management",
+      "checkId": "iam/password-lifecycle",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "password_reuse_prevention",
+          "observed": 24,
+          "expected": "at least 24 previous passwords remembered"
+        },
+        {
+          "resourceAddress": "aws_iam_account_password_policy.strict",
+          "attribute": "max_password_age",
+          "observed": 90,
+          "expected": "expiry of 90 days or fewer"
+        }
+      ]
+    },
+    {
+      "ccmId": "IAM-16",
+      "ccmTitle": "Authorization Mechanisms",
+      "checkId": "iam/no-wildcard-trust",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_iam_role.app",
+          "attribute": "assume_role_policy",
+          "observed": [
+            "ec2.amazonaws.com"
+          ],
+          "expected": "no unconditioned Allow for a wildcard principal"
+        }
+      ]
+    },
+    {
+      "ccmId": "IVS-03",
+      "ccmTitle": "Network Security",
+      "checkId": "ivs/no-open-admin-ports",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_security_group.web",
+          "attribute": "ingress[0]",
+          "observed": {
+            "protocol": "tcp",
+            "from_port": 443,
+            "to_port": 443,
+            "cidrs": [
+              "0.0.0.0/0"
+            ]
+          },
+          "expected": "no ingress from 0.0.0.0/0 or ::/0 to ports 22, 3389, 3306, 5432, 1433, 27017, 6379"
+        }
+      ]
+    },
+    {
+      "ccmId": "IVS-03",
+      "ccmTitle": "Network Security",
+      "checkId": "ivs/s3-public-access-block",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket.logs[\"primary\"]",
+          "attribute": "bucket",
+          "observed": "covered by a public-access block with all four flags enabled",
+          "expected": "all of block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets set to true"
+        }
+      ]
+    },
+    {
+      "ccmId": "IVS-03",
+      "ccmTitle": "Network Security",
+      "checkId": "ivs/s3-public-access-block",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "module.storage.module.replica.aws_s3_bucket.archive",
+          "attribute": "bucket",
+          "observed": "covered by a public-access block with all four flags enabled",
+          "expected": "all of block_public_acls, block_public_policy, ignore_public_acls, restrict_public_buckets set to true"
+        }
+      ]
+    },
+    {
+      "ccmId": "IVS-04",
+      "ccmTitle": "OS Hardening and Base Controls",
+      "checkId": "ivs/na-host-config",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "OS and AMI hardening lives inside the image or host. An instance declaration names an AMI but carries no signal of how that image was built or configured."
+    },
+    {
+      "ccmId": "IVS-06",
+      "ccmTitle": "Segmentation and Segregation",
+      "checkId": "ivs/default-sg-locked-down",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_default_security_group.default",
+          "attribute": "ingress",
+          "observed": "no rules",
+          "expected": "no rules"
+        },
+        {
+          "resourceAddress": "aws_default_security_group.default",
+          "attribute": "egress",
+          "observed": "no rules",
+          "expected": "no rules"
+        }
+      ]
+    },
+    {
+      "ccmId": "IVS-08",
+      "ccmTitle": "Network Architecture Documentation",
+      "checkId": "ivs/na-documentation",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "Network architecture documentation is a written deliverable reviewed by people. No resource attribute evidences whether it exists or is current."
+    },
+    {
+      "ccmId": "LOG-02",
+      "ccmTitle": "Audit Logs Protection",
+      "checkId": "log/cloudtrail-log-validation",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_cloudtrail.main",
+          "attribute": "enable_log_file_validation",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket.logs[\"primary\"]",
+          "attribute": "bucket",
+          "observed": "holds the logs of aws_cloudtrail.main",
+          "expected": "the log bucket to be both server-side encrypted and fully public-access-blocked"
+        },
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket_server_side_encryption_configuration.logs",
+          "attribute": "bucket",
+          "observed": "configures log bucket \"example-compliant-logs\"",
+          "expected": "the log bucket to be both server-side encrypted and fully public-access-blocked"
+        },
+        {
+          "resourceAddress": "module.storage.aws_s3_bucket_public_access_block.logs",
+          "attribute": "bucket",
+          "observed": "configures log bucket \"example-compliant-logs\"",
+          "expected": "the log bucket to be both server-side encrypted and fully public-access-blocked"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-03",
+      "ccmTitle": "Security Monitoring and Alerting",
+      "checkId": "log/vpc-flow-logs",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_vpc.main",
+          "attribute": "id",
+          "observed": "an aws_flow_log targets this VPC",
+          "expected": "a VPC flow log capturing this VPC's traffic"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-04",
+      "ccmTitle": "Audit Logs Access and Accountability",
+      "checkId": "log/cloudtrail-accountability",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_cloudtrail.main",
+          "attribute": "cloud_watch_logs_group_arn",
+          "observed": "arn:aws:logs:eu-west-2:123456789012:log-group:cloudtrail:*",
+          "expected": "delivery to CloudWatch Logs, or access logging on the log bucket"
+        }
+      ]
+    },
+    {
+      "ccmId": "LOG-05",
+      "ccmTitle": "Audit Logs Monitoring and Response",
+      "checkId": "log/na-operational",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "Monitoring logs and responding to what they show is an operational activity. Declarative infrastructure can show that a log exists, never that anyone acted on it."
+    },
+    {
+      "ccmId": "LOG-06",
+      "ccmTitle": "Clock Synchronization",
+      "checkId": "log/na-host-runtime",
+      "status": "not_applicable",
+      "evidence": [],
+      "reason": "NTP and clock synchronisation are configured inside the host or image, below the infrastructure graph this scanner reads."
+    },
+    {
+      "ccmId": "LOG-07",
+      "ccmTitle": "Logging Scope",
+      "checkId": "log/cloudtrail-multi-region",
+      "status": "pass",
+      "evidence": [
+        {
+          "resourceAddress": "aws_cloudtrail.main",
+          "attribute": "is_multi_region_trail",
+          "observed": true,
+          "expected": "true"
+        },
+        {
+          "resourceAddress": "aws_cloudtrail.main",
+          "attribute": "include_global_service_events",
+          "observed": true,
+          "expected": "true"
+        }
+      ]
+    }
+  ]
+}

@@ -25,6 +25,7 @@ import {
   parseControls,
   parseFailOn,
   parseFormat,
+  parseInputFormat,
   UsageError,
   validateDestination,
   type ScanOptions,
@@ -41,6 +42,7 @@ interface RawScanFlags {
   readonly failOn: string;
   readonly out?: string;
   readonly generatedAt?: string;
+  readonly inputFormat?: string;
 }
 
 /** Reads the input, refusing a directory with a message that says what to do. */
@@ -69,6 +71,7 @@ function toOptions(flags: RawScanFlags): ScanOptions {
     format,
     failOn: parseFailOn(flags.failOn),
     out: flags.out,
+    inputFormat: flags.inputFormat === undefined ? undefined : parseInputFormat(flags.inputFormat),
   };
 }
 
@@ -143,13 +146,14 @@ export function main(argv: readonly string[]): number {
   let code = 0;
   program
     .command("scan")
-    .description("Scan a Terraform plan or state JSON document against the CCM subset")
-    .requiredOption("-i, --input <path>", "`terraform show -json` output to scan")
+    .description("Scan Terraform output or a cloud snapshot against the CCM subset")
+    .requiredOption("-i, --input <path>", "`terraform show -json` output, or a snapshot")
     .option("-c, --controls <list>", "all | domains (iam,log,cek,ivs) | ids (IAM-05,CEK-12)", "all")
     .option("-f, --format <format>", "json | md | both", "md")
     .option("-o, --out <dir>", "write the evidence pack here instead of stdout")
     .option("--fail-on <mode>", "fail (non-zero exit on any failing control) | none", "fail")
     .option("--generated-at <iso>", "fix the report timestamp, for reproducible output")
+    .option("--input-format <format>", "terraform | snapshot (detected by default)")
     .action((flags: RawScanFlags) => {
       code = scan(flags);
     });

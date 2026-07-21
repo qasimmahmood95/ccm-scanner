@@ -2,10 +2,12 @@
  * Removing values Terraform marked sensitive before they reach a report.
  *
  * `terraform show -json` of *state* puts real secrets in `values` — an RDS
- * password, a private key — and marks them in `sensitive_values`. The report is
- * an artifact people commit, attach to a ticket and hand to an auditor, so a
- * secret that reaches it has been published. Ingest carries the marks through
- * on `Resource.sensitiveAttributes`; this is where they are honoured.
+ * password, a private key — and marks them in `sensitive_values`; a snapshot
+ * marks them directly with `sensitiveAttributes`. Either way the report is an
+ * artifact people commit, attach to a ticket and hand to an auditor, so a
+ * secret that reaches it has been published. Both adapters converge the marks
+ * onto `Resource.sensitiveAttributes`; this is where they are honoured, so a
+ * new input format is covered the moment it populates that field.
  *
  * Redaction happens between evaluation and report building rather than in a
  * renderer, so every output format is covered by construction and a new
@@ -27,7 +29,7 @@
 import type { ResourceModel } from "../model/resource.js";
 import type { Evidence, Verdict } from "../model/verdict.js";
 
-export const REDACTED = "[redacted: marked sensitive by Terraform]";
+export const REDACTED = "[redacted: marked sensitive by the input]";
 
 /** The top-level attribute an evidence path refers to. */
 function topLevel(attribute: string): string {

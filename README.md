@@ -6,11 +6,11 @@
 > **Pass**, **Fail**, or **Not-Applicable**, each verdict carrying its CCM control
 > ID and the evidence it was derived from.
 
-> **Status — milestone M5.** The engine, the four-domain control slice, the CLI
-> and the evidence pack are implemented and run headlessly over the committed
-> fixtures. The read-only cloud-snapshot lane lands in M6 — see the
-> [milestone plan](docs/milestone-plan.md). Anything marked _(planned)_ below is
-> not implemented yet.
+> **Status — milestone M6, feature-complete for v1.** The engine, the
+> four-domain control slice, the CLI, the evidence pack and the read-only
+> cloud-snapshot lane are all implemented and run headlessly over committed
+> fixtures. See the [milestone plan](docs/milestone-plan.md) for what is
+> deliberately out of scope.
 
 ## Why this exists
 
@@ -117,11 +117,136 @@ ccm-scanner scan -i plan.json --format both --out ./report
 # Evidence pack written to /path/to/report
 ```
 
-### Homelab / real-account lane _(planned — M6)_
+## Point it at your own infrastructure
 
-Pointing the scanner at your own homelab Terraform, or at a **read-only** cloud
-snapshot, is a documented local workflow — never a CI dependency, and never
-requiring write credentials.
+Both lanes are local workflows. Neither is a CI dependency, and neither needs
+write credentials.
+
+### Your homelab Terraform
+
+```bash
+cd ~/infra/my-homelab
+terraform plan -out=tfplan          # no apply; the plan file is not executed
+terraform show -json tfplan > plan.json
+ccm-scanner scan --input plan.json --format both --out ./ccm-report
+```
+
+Reading a plan is the safer default: it shows what *would* exist, and a plan
+does not resolve secrets that only exist after apply. To audit what actually
+exists, point it at state instead — same command, same output:
+
+```bash
+terraform show -json > state.json    # current state, no changes made
+ccm-scanner scan --input state.json --out ./ccm-report
+```
+
+Expect **not-applicable** verdicts on a create plan: Terraform cannot know an
+id or a computed flag until apply, and the scanner declines rather than
+guessing. That is not a gap in the scan — it is the plan genuinely not knowing.
+The snapshot lane below resolves exactly those.
+
+### A read-only cloud snapshot
+
+The scanner issues no cloud calls at all — you produce the snapshot, so the tool
+never needs credentials of any kind ([ADR-0004](docs/adr/0004-snapshot-lane.md)).
+
+**1. Grant a least-privilege read-only role.** These are the only permissions
+the documented commands need. Every action is a `Describe`/`Get`/`List` — there
+is no write action in this policy, and nothing under `iam:` beyond reading the
+account password policy and enumerating policies and roles:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CcmScannerReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "cloudtrail:DescribeTrails",
+        "cloudtrail:GetTrailStatus",
+        "ec2:DescribeFlowLogs",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeVpcs",
+        "iam:GetAccountPasswordPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicies",
+        "iam:ListRoles",
+        "kms:DescribeKey",
+        "kms:GetKeyRotationStatus",
+        "kms:ListKeys",
+        "rds:DescribeDBInstances",
+        "s3:GetBucketLogging",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetEncryptionConfiguration",
+        "s3:ListAllMyBuckets"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+AWS's managed `SecurityAudit` policy also covers these if you prefer a managed
+one; it is broader than necessary.
+
+**2. Produce a snapshot.** A snapshot is a JSON document in the scanner's own
+vocabulary — the same resource types and attribute names the Terraform lane
+produces, so every check runs unchanged:
+
+```json
+{
+  "ccmScannerSnapshot": "1",
+  "source": "aws:123456789012:eu-west-2",
+  "capturedAt": "2026-07-21T00:00:00Z",
+  "resources": [
+    {
+      "address": "aws_s3_bucket.logs",
+      "type": "aws_s3_bucket",
+      "attributes": { "bucket": "example-logs" }
+    },
+    {
+      "address": "aws_kms_key.main",
+      "type": "aws_kms_key",
+      "attributes": {
+        "enable_key_rotation": true,
+        "customer_master_key_spec": "SYMMETRIC_DEFAULT"
+      }
+    }
+  ]
+}
+```
+
+Each entry needs an `address` (any unique string), a `type` matching the
+Terraform resource type the checks look for, and the `attributes` those checks
+read. `sensitiveAttributes` is optional and marks values to redact.
+`docs/control-mapping.md` lists the exact attribute each check reads, and
+`fixtures/snapshot/` holds two worked examples.
+
+Build one with the read-only calls above — for instance, KMS key rotation:
+
+```bash
+aws kms list-keys --query 'Keys[].KeyId' --output text   | tr '	' '
+'   | while read -r id; do
+      aws kms get-key-rotation-status --key-id "$id"         --query "{address: 'aws_kms_key.$id', type: 'aws_kms_key',
+                  attributes: {enable_key_rotation: KeyRotationEnabled}}"
+    done
+```
+
+**3. Scan it.** The format is detected automatically:
+
+```bash
+ccm-scanner scan --input snapshot.json --format both --out ./ccm-report
+```
+
+Use `--input-format snapshot` to override detection.
+
+**A snapshot decides things a plan cannot.** Observed state has no
+unknown-until-apply, so a control that a create plan reports as *not-applicable*
+may legitimately **fail** against a snapshot of the same infrastructure. That is
+the lane working — see ADR-0004.
 
 ## Hard constraints
 
@@ -143,6 +268,7 @@ npm test           # vitest
 npm run build      # tsc -> dist/
 npm run scan       # run the CLI from source via tsx
 npm run verify:fixtures  # build, then assert the CLI's exit codes over fixtures
+npm run samples:update   # regenerate docs/samples/
 ```
 
 Conventions: TypeScript strict ESM, vitest, eslint + prettier, Conventional Commits
@@ -154,6 +280,8 @@ Conventions: TypeScript strict ESM, vitest, eslint + prettier, Conventional Comm
 - [`docs/milestone-plan.md`](docs/milestone-plan.md) — roadmap (one PR per milestone)
 - [`docs/control-mapping.md`](docs/control-mapping.md) — CCM control → check (source of truth)
 - [`docs/adr/`](docs/adr/) — architecture decision records
+- [`docs/samples/`](docs/samples/) — committed sample evidence packs
+- [`SECURITY.md`](SECURITY.md) — read-only posture, redaction limits, disclosure
 
 ## License
 

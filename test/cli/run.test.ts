@@ -23,6 +23,7 @@ function options(overrides: Partial<ScanOptions> = {}): ScanOptions {
     format: "both",
     failOn: "fail",
     out: "./out",
+    inputFormat: undefined,
     ...overrides,
   };
 }

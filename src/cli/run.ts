@@ -8,7 +8,7 @@
  */
 import { allChecks } from "../controls/index.js";
 import { createRegistry, evaluate, type ValidatedCheck } from "../engine/index.js";
-import { ingestTerraformPlan } from "../ingest/index.js";
+import { ingest } from "../ingest/index.js";
 import { CCM_VERSION } from "../model/ccm.js";
 import { buildReport, redactSensitive, renderJson, renderSummary } from "../report/index.js";
 import type { Report, ToolInfo } from "../report/index.js";
@@ -81,7 +81,7 @@ export function runScan(request: ScanRequest): ScanResult {
   const { raw, source, options, tool, generatedAt } = request;
 
   const checks = selectChecks(options.controls);
-  const { model, warnings } = ingestTerraformPlan(raw, source);
+  const { model, warnings } = ingest(raw, source, options.inputFormat);
   const verdicts = evaluate(checks, model);
 
   // Redact before building, so no renderer can emit a value Terraform marked
